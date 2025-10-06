@@ -1,41 +1,54 @@
 pipeline {
   agent any
   environment {
-    IMAGE = "yourdockerhubusername/weather-dashboard" // change or leave
-    CONTAINER = "weather_app"
+    AWS_REGION = 'us-east-1'           // change if needed
+    ECR_REPO = 'weather-dashboard'    // change if you used a different name
+    EC2_HOST = ''        // replace with your EC2 public IP
   }
   stages {
     stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Build image') {
       steps {
-        checkout scm
+        sh 'docker build -t ${ECR_REPO}:${BUILD_NUMBER} .'
       }
     }
-    stage('Prepare env') {
+
+    stage('Push to ECR') {
       steps {
-        // pulls OPENWEATHER_API_KEY from Jenkins credentials (create secret text with id openweather-key)
-        withCredentials([string(credentialsId: 'openweather-key', variable: 'OPENWEATHER_API_KEY')]) {
-          sh 'echo "OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}" > .env'
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          sh '''
+            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            ECR_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
+            aws ecr create-repository --repository-name ${ECR_REPO} --region ${AWS_REGION} || true
+            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+            docker tag ${ECR_REPO}:${BUILD_NUMBER} ${ECR_URI}:${BUILD_NUMBER}
+            docker push ${ECR_URI}:${BUILD_NUMBER}
+            echo "ECR_URI=${ECR_URI}:${BUILD_NUMBER}" > ecr_info.txt
+          '''
+        }
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: 'ecr_info.txt', fingerprint: true
         }
       }
     }
-    stage('Build image') {
+
+    stage('Deploy to EC2') {
       steps {
-        sh 'docker build -t $IMAGE:$BUILD_NUMBER .'
+        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
+          sh '''
+            ECR_URI=$(cat ecr_info.txt | cut -d'=' -f2)
+            scp -i $EC2_KEY -o StrictHostKeyChecking=no deploy.sh ubuntu@${EC2_HOST}:/home/ubuntu/
+            ssh -i $EC2_KEY -o StrictHostKeyChecking=no ubuntu@${EC2_HOST} "bash /home/ubuntu/deploy.sh ${ECR_URI} ${AWS_REGION}"
+          '''
+        }
       }
-    }
-    stage('Deploy') {
-      steps {
-        sh '''
-          docker stop $CONTAINER || true
-          docker rm $CONTAINER || true
-          docker run -d --name $CONTAINER -p 80:5000 --env-file .env $IMAGE:$BUILD_NUMBER
-        '''
-      }
-    }
-  }
-  post {
-    always {
-      sh 'docker ps -a || true'
     }
   }
 }
