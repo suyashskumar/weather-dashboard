@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Weather Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width:700px; margin:40px auto; }
+    input, button { padding:8px; font-size:16px; }
+    #result { margin-top:20px; }
+  </style>
+</head>
+<body>
+  <h1>Weather Dashboard</h1>
+  <p>Enter city name (e.g., Delhi, London, Tokyo)</p>
+  <input id="city" placeholder="City name" />
+  <button onclick="fetchWeather()">Get Weather</button>
+
+  <div id="result"></div>
+
+  <script>
+    async function fetchWeather() {
+      const city = document.getElementById('city').value || 'London';
+      document.getElementById('result').innerText = 'Loading...';
+      try {
+        const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
+        const data = await r.json();
+        if (!r.ok) {
+          document.getElementById('result').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+          return;
+        }
+        const html = `
+          <h3>${data.name} — ${data.weather[0].main} (${data.weather[0].description})</h3>
+          <p>Temp: ${data.main.temp} °C | Feels: ${data.main.feels_like} °C | Humidity: ${data.main.humidity}%</p>
+        `;
+        document.getElementById('result').innerHTML = html;
+      } catch (e) {
+        document.getElementById('result').innerText = 'Error: ' + e;
+      }
+    }
+  </script>
+</body>
+</html>
