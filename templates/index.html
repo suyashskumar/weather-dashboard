@@ -4,37 +4,90 @@
   <meta charset="utf-8">
   <title>Weather Dashboard</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width:700px; margin:40px auto; }
-    input, button { padding:8px; font-size:16px; }
-    #result { margin-top:20px; }
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 700px;
+      margin: 40px auto;
+      text-align: center;
+      background: linear-gradient(135deg, #a2d9ff, #e0f7fa);
+      border-radius: 16px;
+      padding: 30px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+    select, button {
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      margin: 5px;
+    }
+    button {
+      cursor: pointer;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #result {
+      margin-top: 20px;
+      text-align: left;
+      background: white;
+      border-radius: 10px;
+      padding: 15px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+    }
   </style>
 </head>
 <body>
-  <h1>Weather Dashboard</h1>
-  <p>Enter city name (e.g., Delhi, London, Tokyo)</p>
-  <input id="city" placeholder="City name" />
+  <h1>🌦 Weather Dashboard</h1>
+  <p>Select a city to view current weather</p>
+
+  <select id="city">
+    <option value="Delhi">Delhi</option>
+    <option value="Mumbai">Mumbai</option>
+    <option value="Kolkata">Kolkata</option>
+    <option value="Chennai">Chennai</option>
+    <option value="Bangalore">Bangalore</option>
+    <option value="London">London</option>
+    <option value="New York">New York</option>
+    <option value="Tokyo">Tokyo</option>
+    <option value="Paris">Paris</option>
+    <option value="Sydney">Sydney</option>
+  </select>
+
   <button onclick="fetchWeather()">Get Weather</button>
 
   <div id="result"></div>
 
   <script>
     async function fetchWeather() {
-      const city = document.getElementById('city').value || 'London';
-      document.getElementById('result').innerText = 'Loading...';
+      const city = document.getElementById('city').value;
+      document.getElementById('result').innerHTML = '<p>Loading...</p>';
+
       try {
         const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
         const data = await r.json();
-        if (!r.ok) {
-          document.getElementById('result').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+        if (!r.ok || !data.current_condition) {
+          document.getElementById('result').innerHTML =
+            `<p style="color:red;">Error fetching weather for "${city}"</p>`;
           return;
         }
-        const html = `
-          <h3>${data.name} — ${data.weather[0].main} (${data.weather[0].description})</h3>
-          <p>Temp: ${data.main.temp} °C | Feels: ${data.main.feels_like} °C | Humidity: ${data.main.humidity}%</p>
+
+        const current = data.current_condition[0];
+        const weatherHtml = `
+          <h2>${city}</h2>
+          <p><strong>Temperature:</strong> ${current.temp_C} °C</p>
+          <p><strong>Feels Like:</strong> ${current.FeelsLikeC} °C</p>
+          <p><strong>Humidity:</strong> ${current.humidity}%</p>
+          <p><strong>Condition:</strong> ${current.weatherDesc[0].value}</p>
         `;
-        document.getElementById('result').innerHTML = html;
+        document.getElementById('result').innerHTML = weatherHtml;
       } catch (e) {
-        document.getElementById('result').innerText = 'Error: ' + e;
+        document.getElementById('result').innerHTML =
+          `<p style="color:red;">Error: ${e.message}</p>`;
       }
     }
   </script>
