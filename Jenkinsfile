@@ -12,6 +12,16 @@ pipeline {
         checkout scm
       }
     }
+    stage('Login to ECR') {
+    steps {
+        echo '🔐 Logging into AWS ECR...'
+        sh '''
+            aws ecr get-login-password --region us-east-1 | \
+            docker login --username AWS --password-stdin 491519648367.dkr.ecr.us-east-1.amazonaws.com
+        '''
+    }
+}
+
 
     stage('Build image') {
       steps {
