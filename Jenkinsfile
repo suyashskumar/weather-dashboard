@@ -2,8 +2,8 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION = 'us-east-1'          // Change if needed
-    ECR_REPO   = 'weather-dashboard'  // Your ECR repo name
+    AWS_REGION = 'us-east-1'
+    ECR_REPO   = 'weather-dashboard'
   }
 
   stages {
@@ -15,12 +15,22 @@ pipeline {
 
     stage('Build image') {
       steps {
-        sh 'docker build -t ${ECR_REPO}:${BUILD_NUMBER} .'
+        echo "🛠️ Building Docker image..."
+        sh '''
+          # Try to use cache from latest build (if exists)
+          docker pull ${ECR_REPO}:latest || true
+
+          docker build \
+            --cache-from ${ECR_REPO}:latest \
+            -t ${ECR_REPO}:${BUILD_NUMBER} \
+            -t ${ECR_REPO}:latest .
+        '''
       }
     }
 
     stage('Push to ECR') {
       steps {
+        echo "🚀 Pushing image to ECR..."
         withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           sh '''
             set -e
@@ -37,7 +47,9 @@ pipeline {
             # Login & push
             aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}
             docker tag ${ECR_REPO}:${BUILD_NUMBER} ${ECR_URI}:${BUILD_NUMBER}
+            docker tag ${ECR_REPO}:latest ${ECR_URI}:latest
             docker push ${ECR_URI}:${BUILD_NUMBER}
+            docker push ${ECR_URI}:latest
 
             echo "ECR_URI=${ECR_URI}:${BUILD_NUMBER}" > ecr_info.txt
           '''
@@ -52,14 +64,16 @@ pipeline {
 
     stage('Deploy to EC2') {
       steps {
-        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY'),
-                         usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+        echo "📦 Deploying on EC2..."
+        withCredentials([
+          sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY'),
+          usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
           sh '''
             set -e
             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
 
-            # Dynamically fetch EC2's current public IP by instance name tag
             EC2_HOST=$(aws ec2 describe-instances \
               --region ${AWS_REGION} \
               --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" \
@@ -71,6 +85,9 @@ pipeline {
 
             scp -i $EC2_KEY -o StrictHostKeyChecking=no deploy.sh ubuntu@$EC2_HOST:/home/ubuntu/
             ssh -i $EC2_KEY -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "bash /home/ubuntu/deploy.sh ${ECR_URI} ${AWS_REGION}"
+
+            # Optional cleanup on Jenkins to save space
+            docker system prune -f
           '''
         }
       }
