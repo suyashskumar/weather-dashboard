@@ -4,103 +4,101 @@ pipeline {
   environment {
     AWS_REGION = 'us-east-1'
     ECR_REPO   = 'weather-dashboard'
+    // AWS_ACCOUNT_ID and EC2_HOST will be set at runtime via script blocks
   }
 
   stages {
     stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Get AWS Account') {
       steps {
-        checkout scm
+        script {
+          // Use aws-creds to ensure aws CLI calls succeed (sets env vars for the powershell call)
+          withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+            def acct = powershell(returnStdout: true, script: '''
+              $env:AWS_ACCESS_KEY_ID = "${env.AWS_ACCESS_KEY_ID}"
+              $env:AWS_SECRET_ACCESS_KEY = "${env.AWS_SECRET_ACCESS_KEY}"
+              aws sts get-caller-identity --query Account --output text
+            ''').trim()
+            if (!acct) { error "Failed to get AWS account ID" }
+            env.AWS_ACCOUNT_ID = acct
+            echo "AWS account: ${env.AWS_ACCOUNT_ID}"
+          }
+        }
       }
     }
-    stage('Login to ECR') {
-    steps {
-        echo '🔐 Logging into AWS ECR...'
-        sh '''
-            aws ecr get-login-password --region us-east-1 | \
-            docker login --username AWS --password-stdin 491519648367.dkr.ecr.us-east-1.amazonaws.com
-        '''
-    }
-}
 
+    stage('Login to ECR') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          powershell '''
+            $env:AWS_ACCESS_KEY_ID = "${env.AWS_ACCESS_KEY_ID}"
+            $env:AWS_SECRET_ACCESS_KEY = "${env.AWS_SECRET_ACCESS_KEY}"
+            aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin ${env:AWS_ACCOUNT_ID}.dkr.ecr.${env:AWS_REGION}.amazonaws.com
+          '''
+        }
+      }
+    }
 
     stage('Build image') {
       steps {
-        echo "🛠️ Building Docker image..."
-        sh '''
-          # Try to use cache from latest build (if exists)
-          docker pull ${ECR_REPO}:latest || true
-
-          docker build \
-            --cache-from ${ECR_REPO}:latest \
-            -t ${ECR_REPO}:${BUILD_NUMBER} \
-            -t ${ECR_REPO}:latest .
+        powershell '''
+          docker build -t %ECR_REPO%:%BUILD_NUMBER% -f Dockerfile .
         '''
       }
     }
 
-    stage('Push to ECR') {
+    stage('Tag & Push to ECR') {
       steps {
-        echo "🚀 Pushing image to ECR..."
         withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          sh '''
-            set -e
-            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-
-            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-            ECR_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
-
-            # Ensure repo exists
-            aws ecr describe-repositories --repository-names ${ECR_REPO} --region ${AWS_REGION} >/dev/null 2>&1 || \
-              aws ecr create-repository --repository-name ${ECR_REPO} --region ${AWS_REGION}
-
-            # Login & push
-            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}
-            docker tag ${ECR_REPO}:${BUILD_NUMBER} ${ECR_URI}:${BUILD_NUMBER}
-            docker tag ${ECR_REPO}:latest ${ECR_URI}:latest
-            docker push ${ECR_URI}:${BUILD_NUMBER}
-            docker push ${ECR_URI}:latest
-
-            echo "ECR_URI=${ECR_URI}:${BUILD_NUMBER}" > ecr_info.txt
+          powershell '''
+            $env:AWS_ACCESS_KEY_ID = "${env.AWS_ACCESS_KEY_ID}"
+            $env:AWS_SECRET_ACCESS_KEY = "${env.AWS_SECRET_ACCESS_KEY}"
+            $ECR_URI = "${env:AWS_ACCOUNT_ID}.dkr.ecr.${env:AWS_REGION}.amazonaws.com/%ECR_REPO%"
+            docker tag %ECR_REPO%:%BUILD_NUMBER% $ECR_URI:%BUILD_NUMBER%
+            docker push $ECR_URI:%BUILD_NUMBER%
+            "ECR_URI=$ECR_URI:$BUILD_NUMBER" | Out-File -Encoding ascii ecr_info.txt
           '''
         }
       }
       post {
-        success {
-          archiveArtifacts artifacts: 'ecr_info.txt', fingerprint: true
+        success { archiveArtifacts artifacts: 'ecr_info.txt' }
+      }
+    }
+
+    stage('Resolve EC2 IP (by tag)') {
+      steps {
+        script {
+          // Use aws-creds to run describe-instances and store EC2 host in env.EC2_HOST
+          withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+            def ip = powershell(returnStdout: true, script: '''
+              $env:AWS_ACCESS_KEY_ID = "${env.AWS_ACCESS_KEY_ID}"
+              $env:AWS_SECRET_ACCESS_KEY = "${env.AWS_SECRET_ACCESS_KEY}"
+              # Query EC2 by tag name 'weather-new' and get public IP
+              aws ec2 describe-instances --region ${env:AWS_REGION} --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text
+            ''').trim()
+            if (!ip || ip == "None") { error "Could not find running EC2 instance with tag Name=weather-new" }
+            env.EC2_HOST = ip
+            echo "Resolved EC2 host: ${env.EC2_HOST}"
+          }
         }
       }
     }
 
     stage('Deploy to EC2') {
       steps {
-        echo "📦 Deploying on EC2..."
-        withCredentials([
-          sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY'),
-          usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')
-        ]) {
-          sh '''
-            set -e
-            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-
-            EC2_HOST=$(aws ec2 describe-instances \
-              --region ${AWS_REGION} \
-              --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" \
-              --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
-
-            echo "Deploying to EC2 instance at: $EC2_HOST"
-
-            ECR_URI=$(cut -d'=' -f2 < ecr_info.txt)
-
-            scp -i $EC2_KEY -o StrictHostKeyChecking=no deploy.sh ubuntu@$EC2_HOST:/home/ubuntu/
-            ssh -i $EC2_KEY -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "bash /home/ubuntu/deploy.sh ${ECR_URI} ${AWS_REGION}"
-
-            # Optional cleanup on Jenkins to save space
-            docker system prune -f
-          '''
+        // 'ec2-ssh' should be an SSH private key credential saved in Jenkins (username=ubuntu), we use keyFileVariable
+        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
+          powershell """
+            $EC2_KEY = '${EC2_KEY.replaceAll('\\\\','\\\\\\\\')}'   # Jenkins created temporary path for key
+            $ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=',''
+            scp -o StrictHostKeyChecking=no -i $EC2_KEY .\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
+            ssh -o StrictHostKeyChecking=no -i $EC2_KEY ubuntu@${env.EC2_HOST} "bash /home/ubuntu/deploy.sh $ecr ${env:AWS_REGION}"
+          """
         }
       }
     }
-  }
-}
+  } // stages
+} // pipeline
