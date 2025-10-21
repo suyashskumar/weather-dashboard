@@ -43,25 +43,21 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    // Double quotes are mandatory here to interpolate AWS_REGION and env.AWS_ACCOUNT_ID
                     powershell """
+                        # The AWS CLI will use these environment variables directly for the Get-Login-Password command
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+
                         \$env:AWS_REGION = "${AWS_REGION}"
                         \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
-                        Write-Output "aws --version:"
-                        aws --version
-
-                        Write-Output "docker --version:"
-                        docker --version
-
                         Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
 
-                        # Local PowerShell variables are escaped with a backslash
+                        # \$ecrUri is local, must be escaped
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
                         Write-Output "ECR URI: \$ecrUri"
 
+                        # Force the ECR URI to be explicitly defined in the docker login command
                         \$password = aws ecr get-login-password --region \$env:AWS_REGION
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
