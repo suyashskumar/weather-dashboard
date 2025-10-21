@@ -20,7 +20,6 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // This stage is safe with single quotes because no global env vars are interpolated here
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -42,13 +41,11 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    // Triple double-quotes are used, and backslashes are removed
                     powershell """
-                        # Use # for PowerShell comments
+                        # Assigning Jenkins global variables to the PowerShell environment
                         $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
                         $env:AWS_REGION = "${AWS_REGION}"
-                        # Use the globally set AWS Account ID from the previous stage
                         $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
                         Write-Output "aws --version:"
@@ -62,7 +59,6 @@ pipeline {
                         $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com"
                         Write-Output "ECR URI: $ecrUri"
 
-                        # This command now works because $env:AWS_REGION is correctly set
                         $password = aws ecr get-login-password --region $env:AWS_REGION
                         if (-not $password) { Write-Error "Failed to get ECR password"; exit 3 }
 
@@ -79,9 +75,8 @@ pipeline {
         stage('Build image') {
             steps {
                 powershell """
-                    # Changed comment to #
                     if (-not $env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
-                    # Interpolate BUILD_NUMBER from Jenkins env
+                    # BUILD_NUMBER is a Jenkins variable, so use ${BUILD_NUMBER}
                     $tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
                     Write-Output "Building Docker image $tag"
                     docker build -t $tag -f Dockerfile .
@@ -99,7 +94,7 @@ pipeline {
                         $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
                         $env:AWS_REGION = "${AWS_REGION}"
-                        $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" # Ensure Account ID is available
+                        $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
 
                         $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/$env:ECR_REPO"
                         $localTag = "$env:ECR_REPO:$env:BUILD_NUMBER"
@@ -150,14 +145,25 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
                     powershell """
-                        # Backslashes removed from PowerShell $ variables
+                        # $keyPath is a local PowerShell variable, but it's defined using a Groovy variable (${EC2_KEY})
                         $keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
+                        
+                        # $ecr is a local PowerShell variable. Groovy needs to ignore the $ sign.
                         $ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
+                        
+                        # env.EC2_HOST is a Groovy variable and needs interpolation
                         Write-Output "Copying deploy.sh to ubuntu@${env.EC2_HOST}"
+                        
+                        # $keyPath is a local PowerShell variable. Groovy needs to ignore the $ sign.
                         scp -o StrictHostKeyChecking=no -i \"$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
 
+                        # Groovy interpolation for EC2_HOST
                         Write-Output "Running deploy on ${env.EC2_HOST}"
-                        ssh -o StrictHostKeyChecking=no -i \"$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh $ecr ${env.AWS_REGION}\"
+                        
+                        # $keyPath is a local PowerShell variable. $ecr is a local PowerShell variable.
+                        # $env:AWS_REGION is a PowerShell environment variable set from a Groovy variable.
+                        # We must escape $ecr to prevent Groovy from trying to interpolate it.
+                        ssh -o StrictHostKeyChecking=no -i \"$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr ${env.AWS_REGION}\"
                     """
                 }
             }
