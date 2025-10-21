@@ -44,25 +44,27 @@ pipeline {
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
-                        # The AWS CLI will use these environment variables directly for the Get-Login-Password command
-                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-
                         \$env:AWS_REGION = "${AWS_REGION}"
                         \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
                         Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
 
-                        # \$ecrUri is local, must be escaped
+                        # Local ECR URI variable
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
                         Write-Output "ECR URI: \$ecrUri"
 
-                        # Force the ECR URI to be explicitly defined in the docker login command
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION
+                        Write-Output "Attempting docker login..."
+
+                        # Use the environment variables set by withCredentials directly for the AWS CLI call
+                        \$password = aws ecr get-login-password --region \$env:AWS_REGION `
+                            --output text `
+                            --profile default
+
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
-                        Write-Output "Attempting docker login..."
+                        # Pipe the password to docker login
                         \$password | docker login --username AWS --password-stdin \$ecrUri
+
                         if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
 
                         Write-Output "Docker login succeeded."
