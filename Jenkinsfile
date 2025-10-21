@@ -20,6 +20,7 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        // Single-quoted block is safe for interpolation here
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -42,10 +43,11 @@ pipeline {
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
-                        $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        $env:AWS_REGION = "${AWS_REGION}"
-                        $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
+                        # Jenkins vars (${...}) are interpolated; local vars (\$...) are escaped
+                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
+                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+                        \$env:AWS_REGION = "${AWS_REGION}"
+                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
                         Write-Output "aws --version:"
                         aws --version
@@ -53,17 +55,18 @@ pipeline {
                         Write-Output "docker --version:"
                         docker --version
 
-                        Write-Output "AWS account: $env:AWS_ACCOUNT_ID"
+                        Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
 
-                        $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com"
-                        Write-Output "ECR URI: $ecrUri"
+                        \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
+                        Write-Output "ECR URI: \$ecrUri"
 
-                        $password = aws ecr get-login-password --region $env:AWS_REGION
-                        if (-not $password) { Write-Error "Failed to get ECR password"; exit 3 }
+                        # \$password is a local variable, must be escaped
+                        \$password = aws ecr get-login-password --region \$env:AWS_REGION
+                        if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
                         Write-Output "Attempting docker login..."
-                        $password | docker login --username AWS --password-stdin $ecrUri
-                        if ($LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
+                        \$password | docker login --username AWS --password-stdin \$ecrUri
+                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
 
                         Write-Output "Docker login succeeded."
                     """
@@ -74,12 +77,12 @@ pipeline {
         stage('Build image') {
             steps {
                 powershell """
-                    if (-not $env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
-                    # BUILD_NUMBER is a Jenkins environment variable, so we must use brackets for interpolation
-                    $tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
-                    Write-Output "Building Docker image $tag"
-                    docker build -t $tag -f Dockerfile .
-                    if ($LASTEXITCODE -ne 0) { Write-Error "Docker build failed"; exit 1 }
+                    if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
+                    # \$tag is a local variable, must be escaped. BUILD_NUMBER is interpolated.
+                    \$tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
+                    Write-Output "Building Docker image \$tag"
+                    docker build -t \$tag -f Dockerfile .
+                    if (\$LASTEXITCODE -ne 0) { Write-Error "Docker build failed"; exit 1 }
                 """
             }
         }
@@ -90,24 +93,25 @@ pipeline {
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
-                        $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        $env:AWS_REGION = "${AWS_REGION}"
-                        $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
+                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
+                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+                        \$env:AWS_REGION = "${AWS_REGION}"
+                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
 
-                        $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/$env:ECR_REPO"
-                        $localTag = "$env:ECR_REPO:$env:BUILD_NUMBER"
-                        $remoteTag = "$ecrUri:$env:BUILD_NUMBER"
+                        # \$ecrUri, \$localTag, \$remoteTag are local, must be escaped
+                        \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com/\$env:ECR_REPO"
+                        \$localTag = "\$env:ECR_REPO:\$env:BUILD_NUMBER"
+                        \$remoteTag = "\$ecrUri:\$env:BUILD_NUMBER"
 
-                        Write-Output "Tagging $localTag -> $remoteTag"
-                        docker tag $localTag $remoteTag
-                        if ($LASTEXITCODE -ne 0) { Write-Error "Docker tag failed"; exit 1 }
+                        Write-Output "Tagging \$localTag -> \$remoteTag"
+                        docker tag \$localTag \$remoteTag
+                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker tag failed"; exit 1 }
 
-                        Write-Output "Pushing $remoteTag"
-                        docker push $remoteTag
-                        if ($LASTEXITCODE -ne 0) { Write-Error "Docker push failed"; exit 1 }
+                        Write-Output "Pushing \$remoteTag"
+                        docker push \$remoteTag
+                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker push failed"; exit 1 }
 
-                        "ECR_URI=$remoteTag" | Out-File -Encoding ascii ecr_info.txt
+                        "ECR_URI=\$remoteTag" | Out-File -Encoding ascii ecr_info.txt
                     """
                 }
             }
@@ -144,24 +148,21 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
                     powershell """
-                        # The variable $keyPath is created within the script using a Groovy variable (${EC2_KEY})
-                        $keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
+                        # \$keyPath is a local variable
+                        \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
                         
-                        # The variable $ecr is created within the script, Groovy must not interpolate it.
-                        $ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
+                        # \$ecr is a local variable
+                        \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
                         
-                        # Use Jenkins variable interpolation for the hostname
                         Write-Output "Copying deploy.sh to ubuntu@${env.EC2_HOST}"
                         
-                        # $keyPath is a local variable, $env.EC2_HOST is Groovy interpolated
-                        scp -o StrictHostKeyChecking=no -i \"$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
+                        # \$keyPath is local, ${env.EC2_HOST} is Groovy interpolated
+                        scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
 
-                        # Use Jenkins variable interpolation for the hostname
                         Write-Output "Running deploy on ${env.EC2_HOST}"
                         
-                        # ESCAPE \$ecr: This variable is defined INSIDE the PowerShell script, so Groovy must treat it as a literal.
-                        # $env.AWS_REGION is a Jenkins variable, so it's safely interpolated using ${env.AWS_REGION}
-                        ssh -o StrictHostKeyChecking=no -i \"$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr ${env.AWS_REGION}\"
+                        # \$keyPath is local. \$ecr is local, ${env.AWS_REGION} is Groovy interpolated.
+                        ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr ${env.AWS_REGION}\"
                     """
                 }
             }
