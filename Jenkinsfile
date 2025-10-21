@@ -29,23 +29,53 @@ pipeline {
       }
     }
 
-    stage('Login to ECR') {
-      steps {
-        // Keep credentials in scope so aws CLI inside powershell can use them
-        withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                          usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                          passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          // Use triple single quotes to prevent Groovy interpolation; use PowerShell $env:... inside.
-          powershell '''
-            # Construct ECR URI from process env vars
-            if (-not $env:AWS_ACCOUNT_ID) { Write-Error "AWS_ACCOUNT_ID is not set"; exit 1 }
-            $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com"
-            Write-Output "Logging in to ECR: $ecrUri"
-            aws ecr get-login-password --region $env:AWS_REGION | docker login --username AWS --password-stdin $ecrUri
-          '''
+    stage('Login to ECR (diagnose)') {
+  steps {
+    withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+      powershell '''
+        # diagnostic pre-checks
+        Write-Output "aws --version:"
+        aws --version
+        Write-Output "docker --version:"
+        docker --version
+
+        Write-Output "Checking caller identity (should show account id):"
+        aws sts get-caller-identity --query Account --output text
+        if ($LASTEXITCODE -ne 0) { Write-Error "aws sts failed"; exit 2 }
+
+        $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com"
+        Write-Output "ECR URI: $ecrUri"
+
+        Write-Output "Getting ECR password (length check)."
+        $password = aws ecr get-login-password --region $env:AWS_REGION 2>&1
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "aws ecr get-login-password failed: $password"
+          exit 3
         }
-      }
+        Write-Output "password-length: $($password.Length)"
+
+        Write-Output "Attempting docker login (will show docker's response)..."
+        $loginOutput = $null
+        try {
+          $loginOutput = $password | docker login --username AWS --password-stdin $ecrUri 2>&1
+          $drc = $LASTEXITCODE
+        } catch {
+          Write-Error "docker login threw: $_"
+          exit 4
+        }
+        Write-Output "docker login exit code: $drc"
+        Write-Output "docker login output (masked if containing credentials):"
+        Write-Output $loginOutput
+
+        if ($drc -ne 0) { Write-Error "docker login failed (exit $drc)"; exit 5 }
+        Write-Output "Docker login succeeded."
+      '''
     }
+  }
+}
+
 
     stage('Build image') {
       steps {
