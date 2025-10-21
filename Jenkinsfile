@@ -20,7 +20,8 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // Single-quoted block is safe for interpolation here
+                        // Single quotes are used here, as only AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY are passed as env vars 
+                        // by Jenkins and interpolated into the powershell script.
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -42,8 +43,8 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    // Double quotes are mandatory here to interpolate AWS_REGION and env.AWS_ACCOUNT_ID
                     powershell """
-                        # Jenkins vars (${...}) are interpolated; local vars (\$...) are escaped
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
                         \$env:AWS_REGION = "${AWS_REGION}"
@@ -57,10 +58,10 @@ pipeline {
 
                         Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
 
+                        # Local PowerShell variables are escaped with a backslash
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
                         Write-Output "ECR URI: \$ecrUri"
 
-                        # \$password is a local variable, must be escaped
                         \$password = aws ecr get-login-password --region \$env:AWS_REGION
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
@@ -78,7 +79,7 @@ pipeline {
             steps {
                 powershell """
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
-                    # \$tag is a local variable, must be escaped. BUILD_NUMBER is interpolated.
+                    # Interpolate Jenkins BUILD_NUMBER with brackets
                     \$tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
                     Write-Output "Building Docker image \$tag"
                     docker build -t \$tag -f Dockerfile .
@@ -98,7 +99,6 @@ pipeline {
                         \$env:AWS_REGION = "${AWS_REGION}"
                         \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
 
-                        # \$ecrUri, \$localTag, \$remoteTag are local, must be escaped
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com/\$env:ECR_REPO"
                         \$localTag = "\$env:ECR_REPO:\$env:BUILD_NUMBER"
                         \$remoteTag = "\$ecrUri:\$env:BUILD_NUMBER"
@@ -148,20 +148,19 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
                     powershell """
-                        # \$keyPath is a local variable
+                        # All local PowerShell variables are escaped: \$keyPath, \$ecr
                         \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
-                        
-                        # \$ecr is a local variable
                         \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
                         
+                        # Jenkins variable interpolation for the hostname: \${env.EC2_HOST}
                         Write-Output "Copying deploy.sh to ubuntu@${env.EC2_HOST}"
                         
-                        # \$keyPath is local, ${env.EC2_HOST} is Groovy interpolated
+                        # \$keyPath is local, \${env.EC2_HOST} is interpolated
                         scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
 
                         Write-Output "Running deploy on ${env.EC2_HOST}"
                         
-                        # \$keyPath is local. \$ecr is local, ${env.AWS_REGION} is Groovy interpolated.
+                        # \$keyPath is local. \$ecr is local. \${env.AWS_REGION} is interpolated.
                         ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr ${env.AWS_REGION}\"
                     """
                 }
