@@ -20,10 +20,9 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // Pass secrets as env vars directly into PowerShell
+                        // The single-quoted block is safe here, but we ensure AWS_REGION is defined for the next step.
                         def acct = powershell(
                             returnStdout: true,
-                            // This stage uses 'script' and is already safe with single quotes
                             script: '''
                                 $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                                 $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
@@ -43,12 +42,12 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    // CHANGED to triple double-quotes ("""...""") to enable Groovy interpolation
                     powershell """
+                        # Use # for PowerShell comments inside the """ Groovy block
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
                         \$env:AWS_REGION = "${AWS_REGION}"
-                        // Use the globally set AWS Account ID
+                        # Use the globally set AWS Account ID from the previous stage
                         \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
                         Write-Output "aws --version:"
@@ -62,7 +61,7 @@ pipeline {
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
                         Write-Output "ECR URI: \$ecrUri"
 
-                        // This command now correctly uses the interpolated AWS_REGION
+                        # This command now works because \$env:AWS_REGION is correctly set
                         \$password = aws ecr get-login-password --region \$env:AWS_REGION
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
@@ -78,10 +77,10 @@ pipeline {
 
         stage('Build image') {
             steps {
-                // CHANGED to triple double-quotes ("""...""")
                 powershell """
+                    # Changed comment to #
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
-                    // Interpolate BUILD_NUMBER from Jenkins env
+                    # Interpolate BUILD_NUMBER from Jenkins env
                     \$tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
                     Write-Output "Building Docker image \$tag"
                     docker build -t \$tag -f Dockerfile .
@@ -95,12 +94,11 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    // CHANGED to triple double-quotes ("""...""")
                     powershell """
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
                         \$env:AWS_REGION = "${AWS_REGION}"
-                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" // Ensure Account ID is available
+                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" # Ensure Account ID is available
 
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com/\$env:ECR_REPO"
                         \$localTag = "\$env:ECR_REPO:\$env:BUILD_NUMBER"
@@ -129,11 +127,11 @@ pipeline {
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                         def ip = powershell(
                             returnStdout: true,
-                            // This stage uses 'script' and is already safe with single quotes
                             script: '''
                                 $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                                 $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                                $env:AWS_REGION = "${AWS_REGION}"
+                                # The AWS_REGION interpolation is safe here because of the outer 'script' block
+                                $env:AWS_REGION = "${AWS_REGION}" 
 
                                 aws ec2 describe-instances --region $env:AWS_REGION `
                                     --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" `
@@ -151,8 +149,8 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
-                    // KEPT as triple double-quotes ("""...""") which was correct, but added backslashes to $ to be safe
                     powershell """
+                        # Escape \$ for scp/ssh
                         \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
                         \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
                         Write-Output "Copying deploy.sh to ubuntu@\${env:EC2_HOST}"
