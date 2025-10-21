@@ -13,34 +13,34 @@ pipeline {
     }
 
     stage('Get AWS Account') {
-      steps {
-        script {
-          // Use aws-creds to ensure aws CLI calls succeed (sets env vars for the powershell call)
-          withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-            def acct = powershell(returnStdout: true, script: '''
-              $env:AWS_ACCESS_KEY_ID = "${env.AWS_ACCESS_KEY_ID}"
-              $env:AWS_SECRET_ACCESS_KEY = "${env.AWS_SECRET_ACCESS_KEY}"
-              aws sts get-caller-identity --query Account --output text
-            ''').trim()
-            if (!acct) { error "Failed to get AWS account ID" }
-            env.AWS_ACCOUNT_ID = acct
-            echo "AWS account: ${env.AWS_ACCOUNT_ID}"
-          }
-        }
+  steps {
+    script {
+      // withCredentials injects AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY into the child process
+      withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                        passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+        // Call aws directly; don't try to reassign from Groovy env
+        def acct = powershell(returnStdout: true, script: 'aws sts get-caller-identity --query Account --output text').trim()
+        if (!acct) { error "Failed to get AWS account ID" }
+        env.AWS_ACCOUNT_ID = acct
+        echo "AWS account: ${env.AWS_ACCOUNT_ID}"
       }
     }
+  }
+}
 
-    stage('Login to ECR') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          powershell '''
-            $env:AWS_ACCESS_KEY_ID = "${env.AWS_ACCESS_KEY_ID}"
-            $env:AWS_SECRET_ACCESS_KEY = "${env.AWS_SECRET_ACCESS_KEY}"
-            aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin ${env:AWS_ACCOUNT_ID}.dkr.ecr.${env:AWS_REGION}.amazonaws.com
-          '''
-        }
-      }
+stage('Login to ECR') {
+  steps {
+    withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+      powershell '''
+        # withCredentials set AWS env vars for this process automatically
+        aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin ${env:AWS_ACCOUNT_ID}.dkr.ecr.%AWS_REGION%.amazonaws.com
+      '''
     }
+  }
+}
 
     stage('Build image') {
       steps {
