@@ -20,7 +20,7 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // The single-quoted block is safe here, but we ensure AWS_REGION is defined for the next step.
+                        // This stage is safe with single quotes because no global env vars are interpolated here
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -42,13 +42,14 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    // Triple double-quotes are used, and backslashes are removed
                     powershell """
-                        # Use # for PowerShell comments inside the """ Groovy block
-                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        \$env:AWS_REGION = "${AWS_REGION}"
+                        # Use # for PowerShell comments
+                        $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
+                        $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+                        $env:AWS_REGION = "${AWS_REGION}"
                         # Use the globally set AWS Account ID from the previous stage
-                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
+                        $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
                         Write-Output "aws --version:"
                         aws --version
@@ -56,18 +57,18 @@ pipeline {
                         Write-Output "docker --version:"
                         docker --version
 
-                        Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
+                        Write-Output "AWS account: $env:AWS_ACCOUNT_ID"
 
-                        \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
-                        Write-Output "ECR URI: \$ecrUri"
+                        $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com"
+                        Write-Output "ECR URI: $ecrUri"
 
-                        # This command now works because \$env:AWS_REGION is correctly set
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION
-                        if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
+                        # This command now works because $env:AWS_REGION is correctly set
+                        $password = aws ecr get-login-password --region $env:AWS_REGION
+                        if (-not $password) { Write-Error "Failed to get ECR password"; exit 3 }
 
                         Write-Output "Attempting docker login..."
-                        \$password | docker login --username AWS --password-stdin \$ecrUri
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
+                        $password | docker login --username AWS --password-stdin $ecrUri
+                        if ($LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
 
                         Write-Output "Docker login succeeded."
                     """
@@ -79,12 +80,12 @@ pipeline {
             steps {
                 powershell """
                     # Changed comment to #
-                    if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
+                    if (-not $env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
                     # Interpolate BUILD_NUMBER from Jenkins env
-                    \$tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
-                    Write-Output "Building Docker image \$tag"
-                    docker build -t \$tag -f Dockerfile .
-                    if (\$LASTEXITCODE -ne 0) { Write-Error "Docker build failed"; exit 1 }
+                    $tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
+                    Write-Output "Building Docker image $tag"
+                    docker build -t $tag -f Dockerfile .
+                    if ($LASTEXITCODE -ne 0) { Write-Error "Docker build failed"; exit 1 }
                 """
             }
         }
@@ -95,24 +96,24 @@ pipeline {
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
-                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        \$env:AWS_REGION = "${AWS_REGION}"
-                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" # Ensure Account ID is available
+                        $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
+                        $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+                        $env:AWS_REGION = "${AWS_REGION}"
+                        $env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" # Ensure Account ID is available
 
-                        \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com/\$env:ECR_REPO"
-                        \$localTag = "\$env:ECR_REPO:\$env:BUILD_NUMBER"
-                        \$remoteTag = "\$ecrUri:\$env:BUILD_NUMBER"
+                        $ecrUri = "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/$env:ECR_REPO"
+                        $localTag = "$env:ECR_REPO:$env:BUILD_NUMBER"
+                        $remoteTag = "$ecrUri:$env:BUILD_NUMBER"
 
-                        Write-Output "Tagging \$localTag -> \$remoteTag"
-                        docker tag \$localTag \$remoteTag
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker tag failed"; exit 1 }
+                        Write-Output "Tagging $localTag -> $remoteTag"
+                        docker tag $localTag $remoteTag
+                        if ($LASTEXITCODE -ne 0) { Write-Error "Docker tag failed"; exit 1 }
 
-                        Write-Output "Pushing \$remoteTag"
-                        docker push \$remoteTag
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker push failed"; exit 1 }
+                        Write-Output "Pushing $remoteTag"
+                        docker push $remoteTag
+                        if ($LASTEXITCODE -ne 0) { Write-Error "Docker push failed"; exit 1 }
 
-                        "ECR_URI=\$remoteTag" | Out-File -Encoding ascii ecr_info.txt
+                        "ECR_URI=$remoteTag" | Out-File -Encoding ascii ecr_info.txt
                     """
                 }
             }
@@ -130,7 +131,6 @@ pipeline {
                             script: '''
                                 $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                                 $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                                # The AWS_REGION interpolation is safe here because of the outer 'script' block
                                 $env:AWS_REGION = "${AWS_REGION}" 
 
                                 aws ec2 describe-instances --region $env:AWS_REGION `
@@ -150,14 +150,14 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
                     powershell """
-                        # Escape \$ for scp/ssh
-                        \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
-                        \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
-                        Write-Output "Copying deploy.sh to ubuntu@\${env:EC2_HOST}"
-                        scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@\${env:EC2_HOST}:/home/ubuntu/deploy.sh
+                        # Backslashes removed from PowerShell $ variables
+                        $keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
+                        $ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
+                        Write-Output "Copying deploy.sh to ubuntu@${env.EC2_HOST}"
+                        scp -o StrictHostKeyChecking=no -i \"$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
 
-                        Write-Output "Running deploy on \${env:EC2_HOST}"
-                        ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@\${env:EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr \${env:AWS_REGION}\"
+                        Write-Output "Running deploy on ${env.EC2_HOST}"
+                        ssh -o StrictHostKeyChecking=no -i \"$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh $ecr ${env.AWS_REGION}\"
                     """
                 }
             }
