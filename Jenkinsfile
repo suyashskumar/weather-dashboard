@@ -4,7 +4,6 @@ pipeline {
     environment {
         AWS_REGION = 'us-east-1'
         ECR_REPO   = 'weather-dashboard'
-        // AWS_ACCOUNT_ID and EC2_HOST will be set at runtime
     }
 
     stages {
@@ -17,11 +16,10 @@ pipeline {
         stage('Get AWS Account') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // Single quotes are used here, as only AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY are passed as env vars 
-                        // by Jenkins and interpolated into the powershell script.
+                    // FIX: Changed binding from usernamePassword to awsCredentials
+                    withCredentials([awsCredentials(credentialsId: 'aws-creds',
+                                                   accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                                                   secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -40,29 +38,29 @@ pipeline {
 
         stage('Login to ECR (diagnose)') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                // FIX: Changed binding from usernamePassword to awsCredentials
+                withCredentials([awsCredentials(credentialsId: 'aws-creds',
+                                               accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                                               secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
+                        # Pass Jenkins secrets to the PowerShell environment
+                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
+                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+                        
                         \$env:AWS_REGION = "${AWS_REGION}"
                         \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
 
                         Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
 
-                        # Local ECR URI variable
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
                         Write-Output "ECR URI: \$ecrUri"
 
                         Write-Output "Attempting docker login..."
 
-                        # Use the environment variables set by withCredentials directly for the AWS CLI call
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION `
-                            --output text `
-                            --profile default
-
+                        # FINAL FIX: Removed --profile default and ensured clean output with --no-cli-pager
+                        \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
-                        # Pipe the password to docker login
                         \$password | docker login --username AWS --password-stdin \$ecrUri
 
                         if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
@@ -77,8 +75,7 @@ pipeline {
             steps {
                 powershell """
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
-                    # Interpolate Jenkins BUILD_NUMBER with brackets
-                    \$tag = "\${ECR_REPO}:\${BUILD_NUMBER}" 
+                    \$tag = "\$env:ECR_REPO:\$env:BUILD_NUMBER" 
                     Write-Output "Building Docker image \$tag"
                     docker build -t \$tag -f Dockerfile .
                     if (\$LASTEXITCODE -ne 0) { Write-Error "Docker build failed"; exit 1 }
@@ -88,9 +85,10 @@ pipeline {
 
         stage('Tag & Push to ECR') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                // FIX: Changed binding from usernamePassword to awsCredentials
+                withCredentials([awsCredentials(credentialsId: 'aws-creds',
+                                               accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                                               secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
@@ -119,9 +117,10 @@ pipeline {
         stage('Resolve EC2 IP (by tag)') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    // FIX: Changed binding from usernamePassword to awsCredentials
+                    withCredentials([awsCredentials(credentialsId: 'aws-creds',
+                                                   accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                                                   secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                         def ip = powershell(
                             returnStdout: true,
                             script: '''
@@ -146,19 +145,15 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
                     powershell """
-                        # All local PowerShell variables are escaped: \$keyPath, \$ecr
                         \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
                         \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
                         
-                        # Jenkins variable interpolation for the hostname: \${env.EC2_HOST}
                         Write-Output "Copying deploy.sh to ubuntu@${env.EC2_HOST}"
                         
-                        # \$keyPath is local, \${env.EC2_HOST} is interpolated
                         scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
 
                         Write-Output "Running deploy on ${env.EC2_HOST}"
                         
-                        # \$keyPath is local. \$ecr is local. \${env.AWS_REGION} is interpolated.
                         ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr ${env.AWS_REGION}\"
                     """
                 }
