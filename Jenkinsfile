@@ -19,6 +19,7 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        // NOTE: Keeping this as powershell since it worked and is cleaner for setting env vars
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -52,8 +53,7 @@ pipeline {
                             set ECR_URI=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com
                             echo ECR URI: %ECR_URI%
 
-                            echo Attempting docker login using FOR /F workaround...
-                            
+                            REM Get ECR Login Token
                             FOR /F "tokens=*" %%i IN ('aws ecr get-login-password --region %AWS_REGION% --output text --no-cli-pager') DO (
                                 SET AWS_TOKEN=%%i
                             )
@@ -77,7 +77,6 @@ pipeline {
                 powershell """
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
                     
-                    # NOTE: Docker uses just the BUILD_NUMBER as the image name when a repository isn't specified in -t
                     \$tag = "\$env:BUILD_NUMBER" 
 
                     Write-Output "Building Docker image \$tag"
@@ -119,7 +118,6 @@ pipeline {
                             set LOCAL_REPO_NAME=%ECR_REPO%
                             set ECR_URI_FULL=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com/%LOCAL_REPO_NAME%
                             
-                            REM LOCAL_TAG is only the build number to match the built image
                             set LOCAL_TAG=%BUILD_NUMBER% 
                             set REMOTE_TAG=%ECR_URI_FULL%:%BUILD_NUMBER%
 
@@ -152,22 +150,39 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        def ip = powershell(
-                            returnStdout: true,
-                            script: '''
-                                $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                                $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                                $env:AWS_REGION = "${AWS_REGION}" 
+                        bat """
+                            REM Set AWS creds in scope for this command
+                            set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            set AWS_REGION=${AWS_REGION}
+                            
+                            REM Initialize EC2_IP
+                            set EC2_IP=None
 
-                                # ✅ FIX: Put AWS CLI command on a single line to fix the "argument --region: expected one argument" error
-                                aws ec2 describe-instances --region $env:AWS_REGION --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text
-                            '''
-                        ).trim()
-                        
-                        if (!ip || ip == 'None') { error "Could not find running EC2 (tag Name=weather-new)" }
-                        
+                            REM 🚀 FIX: Use BAT 'FOR /F' to reliably capture AWS CLI output (EC2 IP)
+                            FOR /F "tokens=*" %%a IN ('aws ec2 describe-instances --region %AWS_REGION% --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text') DO (
+                                SET EC2_IP=%%a
+                            )
+                            
+                            REM Check the result
+                            IF "%EC2_IP%"=="" (
+                                echo Could not find running EC2 (tag Name=weather-new)
+                                exit /b 1
+                            )
+                            IF "%EC2_IP%"=="None" (
+                                echo Could not find running EC2 (tag Name=weather-new)
+                                exit /b 1
+                            )
+
+                            REM Set the environment variable for Jenkins
+                            echo Resolved EC2 host: %EC2_IP%
+                            echo EC2_HOST=%EC2_IP% > ec2_host_temp.txt
+                        """
+                        // Read the output back into the Jenkins environment
+                        def ip = readFile('ec2_host_temp.txt').trim().replace('EC2_HOST=','')
                         env.EC2_HOST = ip
-                        echo "Resolved EC2 host: ${env.EC2_HOST}"
+                        // Clean up temp file
+                        // bat 'del ec2_host_temp.txt' // Optional: if you prefer to clean up
                     }
                 }
             }
@@ -177,6 +192,7 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
                     powershell """
+                        # Use PowerShell for SCP/SSH commands
                         \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
                         \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
                         
