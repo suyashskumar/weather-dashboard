@@ -191,71 +191,74 @@ pipeline {
         }
 
         stage('Deploy to EC2') {
-            steps {
-                script {
-                    def keyPath = "" // Initialize a Groovy variable
+    steps {
+        script {
+            // Pre-resolve Groovy environment variables for use in the bat command
+            def ec2Host = env.EC2_HOST 
+            def awsRegion = env.AWS_REGION
 
-                    // Use withCredentials to populate the Groovy variable
-                    withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
-                        // The value of SSH_KEY_PATH is available here in the environment
-                        keyPath = env.SSH_KEY_PATH
-                        
-                        // Now, execute the bat command using Groovy interpolation for the path
-                        bat """
-                            @echo off
-                            
-                            REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
-                            
-                            // Groovy resolves '${keyPath}' to the actual file path before Batch starts
-                            echo Securing private key file: ${keyPath}
-                            
-                            REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
-                            icacls "${keyPath}" /inheritance:r
-                            icacls "${keyPath}" /grant:r "NT AUTHORITY\\SYSTEM":F
-                            icacls "${keyPath}" /grant:r "Administrators":F
-                            
-                            IF ERRORLEVEL 1 (
-                                echo ERROR: Failed to set secure permissions on the SSH key.
-                                exit /b 1
-                            )
-                            
-                            REM --- 2. Deployment Logic ---
-                            
-                            REM Retrieve ECR URI from the artifact file
-                            set /p ECR_URI_RAW=<ecr_info.txt
-                            set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
+            // 1. Resolve SSH_KEY_PATH within the withCredentials block
+            withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
+                def keyPath = env.SSH_KEY_PATH
+                
+                // 2. Execute the deployment script
+                bat """
+                    @echo off
 
-                            // All other variables still need double escaping
-                            IF "%%EC2_HOST%%"=="" (
-                                echo ERROR: EC2_HOST is not set. Deployment aborted.
-                                exit /b 1
-                            )
+                    REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
+                    REM Use Groovy interpolation for the key path
+                    echo Securing private key file: ${keyPath}
+                    
+                    REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
+                    icacls "${keyPath}" /inheritance:r
+                    icacls "${keyPath}" /grant:r "NT AUTHORITY\\SYSTEM":F
+                    icacls "${keyPath}" /grant:r "Administrators":F
+                    
+                    IF ERRORLEVEL 1 (
+                        echo ERROR: Failed to set secure permissions on the SSH key.
+                        exit /b 1
+                    )
+                    
+                    REM --- 2. Deployment Logic ---
+                    
+                    REM Retrieve ECR URI from the artifact file
+                    set /p ECR_URI_RAW=<ecr_info.txt
+                    REM Use Batch variable expansion (double percents) for internal SET commands
+                    set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
 
-                            echo Copying deploy.sh to ubuntu@%%EC2_HOST%%
-                            
-                            // Use Groovy interpolation for the key path
-                            scp -o StrictHostKeyChecking=no -i "${keyPath}" .\\deploy.sh ubuntu@%%EC2_HOST%%:/home/ubuntu/deploy.sh
-                            
-                            IF NOT ERRORLEVEL 0 (
-                                echo SCP failed!
-                                exit /b 1
-                            )
+                    REM Use Groovy interpolation for EC2_HOST 
+                    IF "${ec2Host}"=="" (
+                        echo ERROR: EC2_HOST is not set. Deployment aborted.
+                        exit /b 1
+                    )
 
-                            echo Running deploy on %%EC2_HOST%% with image %%ECR_URI_CLEAN%%
-                            
-                            // Use Groovy interpolation for the key path
-                            ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@%%EC2_HOST%% "bash /home/ubuntu/deploy.sh %%ECR_URI_CLEAN%% %%AWS_REGION%%"
-                            
-                            IF NOT ERRORLEVEL 0 (
-                                echo SSH deployment failed!
-                                exit /b 1
-                            )
-                            
-                            echo Deployment successful to %%EC2_HOST%%.
-                        """
-                    }
-                }
+                    echo Copying deploy.sh to ubuntu@${ec2Host}
+                    
+                    REM Use Groovy interpolation for keyPath and ec2Host
+                    scp -o StrictHostKeyChecking=no -i "${keyPath}" .\\deploy.sh ubuntu@${ec2Host}:/home/ubuntu/deploy.sh
+                    
+                    IF NOT ERRORLEVEL 0 (
+                        echo SCP failed!
+                        exit /b 1
+                    )
+
+                    REM Use Batch expansion (%%) for internal variable ECR_URI_CLEAN
+                    echo Running deploy on ${ec2Host} with image %%ECR_URI_CLEAN%%
+                    
+                    REM Use Groovy interpolation for keyPath, ec2Host, and awsRegion
+                    REM Use Batch expansion (%%) for internal variable ECR_URI_CLEAN
+                    ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@${ec2Host} "bash /home/ubuntu/deploy.sh %%ECR_URI_CLEAN%% ${awsRegion}"
+                    
+                    IF NOT ERRORLEVEL 0 (
+                        echo SSH deployment failed!
+                        exit /b 1
+                    )
+                    
+                    echo Deployment successful to ${ec2Host}.
+                """
             }
         }
+    }
+}
     }
 }
