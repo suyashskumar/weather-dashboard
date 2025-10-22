@@ -147,7 +147,6 @@ pipeline {
         stage('Resolve EC2 IP (by tag)') {
             steps {
                 script {
-                    // FIX: Changed binding to use aws-creds and switched from Powershell to Batch (bat)
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
@@ -157,33 +156,35 @@ pipeline {
                             set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
                             set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             set AWS_REGION=${AWS_REGION}
-                            set EC2_HOST_TEMP_FILE=ec2_host_temp.txt
-
+                            set EC2_HOST_TEMP_FILE=ec2_host_ip.txt
+                            
                             echo Searching for running EC2 instance in %AWS_REGION% with tag Name=weather-new...
 
-                            REM Query AWS CLI and capture output to variable
-                            FOR /F "tokens=*" %%i IN ('aws ec2 describe-instances --region %AWS_REGION% --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text') DO (
-                                SET EC2_IP=%%i
-                            )
+                            REM Query AWS CLI and write ONLY the IP to the temp file
+                            aws ec2 describe-instances --region %AWS_REGION% --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text > %EC2_HOST_TEMP_FILE%
 
-                            IF NOT DEFINED EC2_IP GOTO IP_NOT_FOUND
-                            IF "%EC2_IP%" == "None" GOTO IP_NOT_FOUND
+                            REM Read the IP from the file and store it in an environment variable (for logging/checking)
+                            SET /P EC2_IP=< %EC2_HOST_TEMP_FILE%
+
+                            IF NOT DEFINED EC2_IP GOTO IP_ERROR
+                            IF "%EC2_IP%" == "None" GOTO IP_ERROR
 
                             echo Resolved EC2 Host IP: %EC2_IP%
-                            echo EC2_HOST=%EC2_IP%> %EC2_HOST_TEMP_FILE%
                             GOTO END
 
-                            :IP_NOT_FOUND
+                            :IP_ERROR
                             echo ERROR: Could not find running EC2 (tag Name=weather-new) in %AWS_REGION%. Check instance status.
                             exit /b 1
 
                             :END
                         """
-                        // Read the output back into the Jenkins environment
-                        def ip = readFile('ec2_host_temp.txt').trim().replace('EC2_HOST=','')
+                        // Read the IP (which is the only content of the file) and assign it to the environment variable.
+                        // Note: The file name has been changed to ec2_host_ip.txt to avoid confusion with the old variable name
+                        def ip = readFile('ec2_host_ip.txt').trim()
                         env.EC2_HOST = ip.trim()
+                        echo "EC2_HOST set to: ${env.EC2_HOST}"
                         // clean up temp file
-                        bat 'del /f ec2_host_temp.txt'
+                        bat 'del /f ec2_host_ip.txt'
                     }
                 }
             }
