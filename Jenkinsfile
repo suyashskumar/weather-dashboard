@@ -77,7 +77,7 @@ pipeline {
                 powershell """
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
                     
-                    # FIX: Use only the BUILD_NUMBER as the local tag to match Docker's behavior
+                    # NOTE: Docker uses just the BUILD_NUMBER as the image name when a repository isn't specified in -t
                     \$tag = "\$env:BUILD_NUMBER" 
 
                     Write-Output "Building Docker image \$tag"
@@ -119,7 +119,7 @@ pipeline {
                             set LOCAL_REPO_NAME=%ECR_REPO%
                             set ECR_URI_FULL=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com/%LOCAL_REPO_NAME%
                             
-                            REM FIX: LOCAL_TAG must be only the build number (e.g., '32') to match the built image
+                            REM LOCAL_TAG is only the build number to match the built image
                             set LOCAL_TAG=%BUILD_NUMBER% 
                             set REMOTE_TAG=%ECR_URI_FULL%:%BUILD_NUMBER%
 
@@ -159,9 +159,8 @@ pipeline {
                                 $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
                                 $env:AWS_REGION = "${AWS_REGION}" 
 
-                                aws ec2 describe-instances --region $env:AWS_REGION `
-                                    --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" `
-                                    --query "Reservations[0].Instances[0].PublicIpAddress" --output text
+                                # ✅ FIX: Put AWS CLI command on a single line to fix the "argument --region: expected one argument" error
+                                aws ec2 describe-instances --region $env:AWS_REGION --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text
                             '''
                         ).trim()
                         
