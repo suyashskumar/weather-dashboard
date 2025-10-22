@@ -38,39 +38,40 @@ pipeline {
 
         stage('Login to ECR (diagnose)') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    powershell """
-                        # Pass Jenkins secrets to the PowerShell environment
-                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        
-                        \$env:AWS_REGION = "${AWS_REGION}"
-                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}" 
+                script { // Must use 'script' to contain the 'bat' step inside stages
+                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        // Using 'bat' command prompt syntax to reliably capture the ECR token without newlines.
+                        bat """
+                            REM Set environment variables for AWS CLI
+                            set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            set AWS_REGION=${AWS_REGION}
+                            set AWS_ACCOUNT_ID=${env.AWS_ACCOUNT_ID}
 
-                        Write-Output "AWS account: \$env:AWS_ACCOUNT_ID"
+                            echo AWS account: %AWS_ACCOUNT_ID%
+                            set ECR_URI=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com
+                            echo ECR URI: %ECR_URI%
 
-                        \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
-                        Write-Output "ECR URI: \$ecrUri"
+                            echo Attempting docker login using FOR /F workaround...
+                            
+                            REM ✅ WORKAROUND: FOR /F captures the output as a single, clean string
+                            FOR /F "tokens=*" %%i IN ('aws ecr get-login-password --region %AWS_REGION% --output text --no-cli-pager') DO (
+                                SET AWS_TOKEN=%%i
+                            )
+                            
+                            echo %AWS_TOKEN% | docker login --username AWS --password-stdin %ECR_URI%
 
-                        Write-Output "Attempting docker login..."
+                            REM Check the exit code (ErrorLevel) from the docker login command
+                            IF NOT ERRORLEVEL 0 (
+                                echo Docker login failed.
+                                exit /b 5
+                            )
 
-                        # ✅ ULTIMATE, TRIPLE-SAFE STRING CLEANING FIX: Capture, Trim, and Replace
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager
-                        
-                        # Trim surrounding whitespace, then explicitly remove any internal CR/LF characters
-                        \$password = \$password.Trim()
-                        \$password = \$password.Replace("`r", "").Replace("`n", "")
-
-                        if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
-
-                        \$password | docker login --username AWS --password-stdin \$ecrUri
-
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed"; exit 5 }
-
-                        Write-Output "Docker login succeeded."
-                    """
+                            echo Docker login succeeded.
+                        """
+                    }
                 }
             }
         }
@@ -89,44 +90,52 @@ pipeline {
 
         stage('Tag & Push to ECR') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    powershell """
-                        \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        \$env:AWS_REGION = "${AWS_REGION}"
-                        \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
+                script { // Must use 'script' to contain the 'bat' step inside stages
+                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        bat """
+                            REM Set environment variables for AWS CLI
+                            set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            set AWS_REGION=${AWS_REGION}
+                            set AWS_ACCOUNT_ID=${env.AWS_ACCOUNT_ID}
 
-                        # Run ECR login again to refresh token before push
-                        \$ecrUriAuth = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
-                        
-                        # ✅ ULTIMATE, TRIPLE-SAFE STRING CLEANING FIX
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager
-                        
-                        # Trim surrounding whitespace, then explicitly remove any internal CR/LF characters
-                        \$password = \$password.Trim()
-                        \$password = \$password.Replace("`r", "").Replace("`n", "")
+                            REM Re-run ECR login for push
+                            set ECR_URI_AUTH=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com
+                            
+                            REM ✅ WORKAROUND: Use FOR /F to capture the clean token
+                            FOR /F "tokens=*" %%i IN ('aws ecr get-login-password --region %AWS_REGION% --output text --no-cli-pager') DO (
+                                SET AWS_TOKEN=%%i
+                            )
+                            
+                            echo %AWS_TOKEN% | docker login --username AWS --password-stdin %ECR_URI_AUTH%
+                            
+                            IF NOT ERRORLEVEL 0 (
+                                echo Docker login failed before push.
+                                exit /b 5
+                            )
+                            
+                            set ECR_URI=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com/%ECR_REPO%
+                            set LOCAL_TAG=%ECR_REPO%:%BUILD_NUMBER%
+                            set REMOTE_TAG=%ECR_URI%:%BUILD_NUMBER%
 
-                        if (-not \$password) { Write-Error "Failed to get ECR password for push"; exit 3 }
-                        
-                        \$password | docker login --username AWS --password-stdin \$ecrUriAuth
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed before push"; exit 5 }
-                        
-                        \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com/\$env:ECR_REPO"
-                        \$localTag = "\$env:ECR_REPO:\$env:BUILD_NUMBER"
-                        \$remoteTag = "\$ecrUri:\$env:BUILD_NUMBER"
+                            echo Tagging %LOCAL_TAG% -> %REMOTE_TAG%
+                            docker tag %LOCAL_TAG% %REMOTE_TAG%
+                            IF NOT ERRORLEVEL 0 (
+                                exit /b 1
+                            )
 
-                        Write-Output "Tagging \$localTag -> \$remoteTag"
-                        docker tag \$localTag \$remoteTag
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker tag failed"; exit 1 }
+                            echo Pushing %REMOTE_TAG%
+                            docker push %REMOTE_TAG%
+                            IF NOT ERRORLEVEL 0 (
+                                exit /b 1
+                            )
 
-                        Write-Output "Pushing \$remoteTag"
-                        docker push \$remoteTag
-                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker push failed"; exit 1 }
-
-                        "ECR_URI=\$remoteTag" | Out-File -Encoding ascii ecr_info.txt
-                    """
+                            REM Write ECR info to file
+                            echo ECR_URI=%REMOTE_TAG%> ecr_info.txt
+                        """
+                    }
                 }
             }
             post { success { archiveArtifacts artifacts: 'ecr_info.txt' } }
@@ -165,13 +174,13 @@ pipeline {
                         \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
                         \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
                         
-                        Write-Output "Copying deploy.sh to ubuntu@${env.EC2_HOST}"
+                        Write-Output "Copying deploy.sh to ubuntu@\${env.EC2_HOST}"
                         
-                        scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@${env.EC2_HOST}:/home/ubuntu/deploy.sh
+                        scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@\${env.EC2_HOST}:/home/ubuntu/deploy.sh
 
-                        Write-Output "Running deploy on ${env.EC2_HOST}"
+                        Write-Output "Running deploy on \${env.EC2_HOST}"
                         
-                        ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@${env.EC2_HOST} \"bash /home/ubuntu/deploy.sh \$ecr ${env.AWS_REGION}\"
+                        ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@\${env.EC2_HOST} "bash /home/ubuntu/deploy.sh \$ecr \${env.AWS_REGION}"
                     """
                 }
             }
