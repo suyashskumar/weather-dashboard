@@ -192,15 +192,27 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
-                    // Switch to the 'bat' step for execution on a Windows agent
+                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
                     bat """
                         @echo off
+                        
+                        REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
+                        
+                        REM Remove inherited permissions and grant Full Control only to the current user (Jenkins service account)
+                        echo Securing private key file: %SSH_KEY_PATH%
+                        icacls "%SSH_KEY_PATH%" /inheritance:r /grant:r "%%USERNAME%%":F
+                        
+                        IF ERRORLEVEL 1 (
+                            echo ERROR: Failed to set secure permissions on the SSH key.
+                            exit /b 1
+                        )
+                        
+                        REM --- 2. Deployment Logic ---
+                        
                         REM Retrieve ECR URI from the artifact file
-                        set /p ECR_URI=<ecr_info.txt
-                        set ECR_URI_CLEAN=%%ECR_URI:ECR_URI=%%
+                        set /p ECR_URI_RAW=<ecr_info.txt
+                        set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
 
-                        REM The EC2_HOST is already available in the environment from the previous stage
                         IF "%EC2_HOST%"=="" (
                             echo ERROR: EC2_HOST is not set. Deployment aborted.
                             exit /b 1
@@ -208,11 +220,8 @@ pipeline {
 
                         echo Copying deploy.sh to ubuntu@%EC2_HOST%
                         
-                        REM Use scp to copy the deploy script (assuming OpenSSH is in PATH)
-                        REM The key file variable needs to be handled carefully in bat
-                        set SSH_KEY_PATH="%EC2_KEY%"
-
-                        scp -o StrictHostKeyChecking=no -i %SSH_KEY_PATH% .\\deploy.sh ubuntu@%EC2_HOST%:/home/ubuntu/deploy.sh
+                        REM scp command - use the now-secured SSH_KEY_PATH variable
+                        scp -o StrictHostKeyChecking=no -i "%SSH_KEY_PATH%" .\\deploy.sh ubuntu@%EC2_HOST%:/home/ubuntu/deploy.sh
                         
                         IF NOT ERRORLEVEL 0 (
                             echo SCP failed!
@@ -221,8 +230,8 @@ pipeline {
 
                         echo Running deploy on %EC2_HOST% with image %ECR_URI_CLEAN%
                         
-                        REM Use ssh to execute the deploy script remotely
-                        ssh -o StrictHostKeyChecking=no -i %SSH_KEY_PATH% ubuntu@%EC2_HOST% "bash /home/ubuntu/deploy.sh %ECR_URI_CLEAN% %AWS_REGION%"
+                        REM ssh command
+                        ssh -o StrictHostKeyChecking=no -i "%SSH_KEY_PATH%" ubuntu@%EC2_HOST% "bash /home/ubuntu/deploy.sh %ECR_URI_CLEAN% %AWS_REGION%"
                         
                         IF NOT ERRORLEVEL 0 (
                             echo SSH deployment failed!
