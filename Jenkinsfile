@@ -147,47 +147,40 @@ pipeline {
         stage('Resolve EC2 IP (by tag)') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        bat """
-                            REM Set AWS creds in scope for this command
-                            set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                            set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-                            set AWS_REGION=${AWS_REGION}
-                            
-                            REM Capture AWS CLI output to EC2_IP variable
-                            SET EC2_IP_FOUND=
-                            FOR /F "tokens=*" %%a IN ('aws ec2 describe-instances --region %AWS_REGION% --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text') DO (
-                                SET EC2_IP=%%a
-                                SET EC2_IP_FOUND=true
-                            )
-                            
-                            REM Check the result
-                            IF NOT "%EC2_IP_FOUND%"=="true" (
-                                echo ERROR: AWS CLI command failed to find instance.
-                                exit /b 1
-                            )
-                            
-                            REM The IP is captured, check if it's 'None' or empty (may have leading/trailing spaces)
-                            IF "%EC2_IP%"=="" (
-                                echo ERROR: Could not find running EC2 (tag Name=weather-new). Check instance status.
-                                exit /b 1
-                            )
-                            IF "%EC2_IP%"=="None" (
-                                echo ERROR: Could not find running EC2 (tag Name=weather-new). Check instance status.
-                                exit /b 1
-                            )
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-login', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                        powershell """
+                            \$ErrorActionPreference = "Stop" # Exit on error
 
-                            REM Write the resolved IP to a temporary file
-                            echo EC2_HOST=%EC2_IP%> ec2_host_temp.txt
-                            echo Resolved EC2 host: %EC2_IP%
+                            \$AWS_REGION = "\${env.AWS_REGION}"
+                            
+                            Write-Host "Searching for running EC2 instance in \$AWS_REGION with tag Name=weather-new..."
+
+                            # Use the AWS CLI to query the PublicIpAddress
+                            \$EC2_IP = aws ec2 describe-instances `
+                                --region \$AWS_REGION `
+                                --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" `
+                                --query "Reservations[0].Instances[0].PublicIpAddress" `
+                                --output text
+
+                            # Trim any whitespace from the output (PowerShell's .trim() is more reliable than batch)
+                            \$EC2_IP = \$EC2_IP.Trim()
+
+                            # Check if the IP was found
+                            if (-not \$EC2_IP -or \$EC2_IP -eq "None") {
+                                Write-Error "ERROR: Could not find running EC2 (tag Name=weather-new) in \$AWS_REGION. Check instance status."
+                                exit 1
+                            }
+
+                            Write-Host "Resolved EC2 Host IP: \$EC2_IP"
+                            
+                            # Write the resolved IP to the environment variable for subsequent stages
+                            echo "EC2_HOST=\$EC2_IP" | Out-File -FilePath "ec2_host_temp.txt" -Encoding ASCII -Force
                         """
-                        // Read the output back into the Jenkins environment (trimming handles spaces)
+                        // Read the output back into the Jenkins environment
                         def ip = readFile('ec2_host_temp.txt').trim().replace('EC2_HOST=','')
-                        env.EC2_HOST = ip.trim() // Use trim() again to be safe
+                        env.EC2_HOST = ip.trim()
                         // clean up temp file
-                        bat 'del ec2_host_temp.txt'
+                        powershell 'Remove-Item -Path "ec2_host_temp.txt" -Force'
                     }
                 }
             }
