@@ -193,18 +193,43 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'EC2_KEY')]) {
-                    powershell """
-                        # Use PowerShell for SCP/SSH commands
-                        \$keyPath = '${EC2_KEY}'.Replace('\\\\','\\\\\\\\')
-                        \$ecr = (Get-Content ecr_info.txt) -replace 'ECR_URI=' ,''
-                        
-                        Write-Output "Copying deploy.sh to ubuntu@\${env.EC2_HOST}"
-                        
-                        scp -o StrictHostKeyChecking=no -i \"\$keyPath\" .\\\\deploy.sh ubuntu@\${env.EC2_HOST}:/home/ubuntu/deploy.sh
+                    // Switch to the 'bat' step for execution on a Windows agent
+                    bat """
+                        @echo off
+                        REM Retrieve ECR URI from the artifact file
+                        set /p ECR_URI=<ecr_info.txt
+                        set ECR_URI_CLEAN=%%ECR_URI:ECR_URI=%%
 
-                        Write-Output "Running deploy on \${env.EC2_HOST}"
+                        REM The EC2_HOST is already available in the environment from the previous stage
+                        IF "%EC2_HOST%"=="" (
+                            echo ERROR: EC2_HOST is not set. Deployment aborted.
+                            exit /b 1
+                        )
+
+                        echo Copying deploy.sh to ubuntu@%EC2_HOST%
                         
-                        ssh -o StrictHostKeyChecking=no -i \"\$keyPath\" ubuntu@\${env.EC2_HOST} "bash /home/ubuntu/deploy.sh \$ecr \${env.AWS_REGION}"
+                        REM Use scp to copy the deploy script (assuming OpenSSH is in PATH)
+                        REM The key file variable needs to be handled carefully in bat
+                        set SSH_KEY_PATH="%EC2_KEY%"
+
+                        scp -o StrictHostKeyChecking=no -i %SSH_KEY_PATH% .\\deploy.sh ubuntu@%EC2_HOST%:/home/ubuntu/deploy.sh
+                        
+                        IF NOT ERRORLEVEL 0 (
+                            echo SCP failed!
+                            exit /b 1
+                        )
+
+                        echo Running deploy on %EC2_HOST% with image %ECR_URI_CLEAN%
+                        
+                        REM Use ssh to execute the deploy script remotely
+                        ssh -o StrictHostKeyChecking=no -i %SSH_KEY_PATH% ubuntu@%EC2_HOST% "bash /home/ubuntu/deploy.sh %ECR_URI_CLEAN% %AWS_REGION%"
+                        
+                        IF NOT ERRORLEVEL 0 (
+                            echo SSH deployment failed!
+                            exit /b 1
+                        )
+                        
+                        echo Deployment successful to %EC2_HOST%.
                     """
                 }
             }
