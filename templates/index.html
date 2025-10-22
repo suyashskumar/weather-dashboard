@@ -1,95 +1,527 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Weather Dashboard</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 700px;
-      margin: 40px auto;
-      text-align: center;
-      background: linear-gradient(135deg, #a2d9ff, #e0f7fa);
-      border-radius: 16px;
-      padding: 30px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-    }
-    select, button {
-      padding: 10px;
-      font-size: 16px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      margin: 5px;
-    }
-    button {
-      cursor: pointer;
-      background-color: #007BFF;
-      color: white;
-      border: none;
-    }
-    button:hover {
-      background-color: #0056b3;
-    }
-    #result {
-      margin-top: 20px;
-      text-align: left;
-      background: white;
-      border-radius: 10px;
-      padding: 15px;
-      box-shadow: 0 3px 6px rgba(0,0,0,0.1);
-    }
-  </style>
-</head>
-<body>
-  <h1>🌦 Weather Dashboard</h1>
-  <p>Select a city to view current weather</p>
-
-  <select id="city">
-    <option value="Delhi">Delhi</option>
-    <option value="Mumbai">Mumbai</option>
-    <option value="Kolkata">Kolkata</option>
-    <option value="Chennai">Chennai</option>
-    <option value="Bangalore">Bangalore</option>
-    <option value="London">London</option>
-    <option value="New York">New York</option>
-    <option value="Tokyo">Tokyo</option>
-    <option value="Paris">Paris</option>
-    <option value="Sydney">Sydney</option>
-  </select>
-
-  <button onclick="fetchWeather()">Get Weather</button>
-
-  <div id="result"></div>
-
-  <script>
-    async function fetchWeather() {
-      const city = document.getElementById('city').value;
-      document.getElementById('result').innerHTML = '<p>Loading...</p>';
-
-      try {
-        const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
-        const data = await r.json();
-
-        if (!r.ok || !data.current_condition) {
-          document.getElementById('result').innerHTML =
-            `<p style="color:red;">Error fetching weather for "${city}"</p>`;
-          return;
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Weather Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Default/Fallback Background */
+            --bg-start: #a2d9ff;
+            --bg-end: #e0f7fa;
+            --text-color: #333;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --icon-filter: none; /* For SVG icon color */
+            --button-bg: #007BFF;
+            --button-hover-bg: #0056b3;
+            --input-border: #ccc;
         }
 
-        const current = data.current_condition[0];
-        const weatherHtml = `
-          <h2>${city}</h2>
-          <p><strong>Temperature:</strong> ${current.temp_C} °C</p>
-          <p><strong>Feels Like:</strong> ${current.FeelsLikeC} °C</p>
-          <p><strong>Humidity:</strong> ${current.humidity}%</p>
-          <p><strong>Condition:</strong> ${current.weatherDesc[0].value}</p>
-        `;
-        document.getElementById('result').innerHTML = weatherHtml;
-      } catch (e) {
-        document.getElementById('result').innerHTML =
-          `<p style="color:red;">Error: ${e.message}</p>`;
-      }
-    }
-  </script>
+        body {
+            margin: 0;
+            font-family: 'Poppins', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            text-align: center;
+            transition: background-image 1s ease-in-out;
+            background-image: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+            color: var(--text-color);
+            overflow-x: hidden; /* Prevent horizontal scroll from gradients */
+        }
+
+        .container {
+            max-width: 600px;
+            width: 90%;
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+            backdrop-filter: blur(10px); /* Frosted glass effect */
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transition: transform 0.3s ease;
+        }
+
+        .container:hover {
+            transform: translateY(-5px);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            color: var(--text-color);
+            position: relative;
+        }
+
+        h1 span {
+            display: inline-block;
+            animation: bounce 0.5s infinite alternate;
+        }
+
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-5px); }
+        }
+
+        p {
+            font-size: 1.1em;
+            color: var(--text-color);
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 25px;
+            margin-bottom: 25px;
+            justify-content: center;
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        }
+
+        #cityInput, button {
+            padding: 12px 20px;
+            font-size: 1.1em;
+            border-radius: 25px; /* Pill-shaped */
+            border: 1px solid var(--input-border);
+            margin: 0; /* Remove default margins */
+            transition: all 0.3s ease;
+        }
+
+        #cityInput {
+            flex-grow: 1; /* Allows input to take available space */
+            max-width: 300px; /* Limit max width */
+            background-color: rgba(255, 255, 255, 0.8);
+            color: var(--text-color);
+        }
+
+        #cityInput::placeholder {
+            color: #888;
+        }
+
+        #cityInput:focus {
+            outline: none;
+            border-color: var(--button-bg);
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.2);
+        }
+
+        button {
+            cursor: pointer;
+            background-color: var(--button-bg);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+        }
+
+        button:hover {
+            background-color: var(--button-hover-bg);
+            box-shadow: 0 6px 12px rgba(0, 123, 255, 0.4);
+            transform: translateY(-2px);
+        }
+
+        #weatherResult {
+            margin-top: 30px;
+            text-align: center; /* Center content within result */
+            min-height: 150px; /* Prevent layout shift when loading */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .weather-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            color: #333;
+        }
+
+        .weather-icon {
+            font-size: 4em; /* Larger emoji icon */
+            line-height: 1;
+        }
+
+        .weather-card h2 {
+            margin: 0;
+            font-size: 2.2em;
+            color: #222;
+        }
+
+        .weather-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            width: 100%;
+            max-width: 300px; /* Constrain details width */
+            text-align: left;
+        }
+
+        .weather-details p {
+            margin: 0;
+            font-size: 1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #555;
+        }
+
+        .weather-details p strong {
+            color: #333;
+        }
+        
+        /* Dynamic Backgrounds (Conditional Styles) */
+
+        /* Sunny Day */
+        body.sunny {
+            --bg-start: #FFD700; /* Gold */
+            --bg-end: #FFECB3;  /* Light Yellow */
+            --text-color: #333;
+            --card-bg: rgba(255, 255, 255, 0.85);
+            --button-bg: #FFC107;
+            --button-hover-bg: #FFA000;
+        }
+        .sunny .weather-icon {
+            animation: sun-rotate 10s linear infinite;
+        }
+        @keyframes sun-rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Cloudy Day */
+        body.cloudy {
+            --bg-start: #B0BEC5; /* Blue Grey */
+            --bg-end: #ECEFF1;  /* Light Grey */
+            --text-color: #333;
+            --card-bg: rgba(255, 255, 255, 0.8);
+            --button-bg: #607D8B;
+            --button-hover-bg: #455A64;
+        }
+
+        /* Rainy Day */
+        body.rainy {
+            --bg-start: #616161; /* Dark Grey */
+            --bg-end: #9E9E9E;  /* Medium Grey */
+            --text-color: #EEE;
+            --card-bg: rgba(255, 255, 255, 0.7);
+            --button-bg: #424242;
+            --button-hover-bg: #212121;
+        }
+        body.rainy h1, body.rainy p, body.rainy #cityInput, body.rainy .weather-card h2 {
+            color: var(--text-color);
+        }
+        body.rainy .weather-card {
+            background: rgba(255, 255, 255, 0.85);
+        }
+        .rainy .weather-icon {
+            animation: rain-drop 0.8s ease-in-out infinite;
+        }
+        @keyframes rain-drop {
+            0% { transform: translateY(0); opacity: 1; }
+            50% { transform: translateY(10px); opacity: 0.5; }
+            100% { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Snowy Day */
+        body.snowy {
+            --bg-start: #E0F2F7; /* Light Blue-Grey */
+            --bg-end: #FFFFFF;  /* White */
+            --text-color: #333;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --button-bg: #78909C;
+            --button-hover-bg: #607D8B;
+        }
+        .snowy .weather-icon {
+            animation: snowflake-fall 3s linear infinite;
+        }
+        @keyframes snowflake-fall {
+            0% { transform: translateY(-10px); opacity: 0.8; }
+            100% { transform: translateY(10px); opacity: 0; }
+        }
+
+        /* Thunderstorm */
+        body.thunderstorm {
+            --bg-start: #424242; /* Dark Grey */
+            --bg-end: #212121;  /* Very Dark Grey */
+            --text-color: #FFF;
+            --card-bg: rgba(255, 255, 255, 0.6);
+            --button-bg: #37474F;
+            --button-hover-bg: #263238;
+        }
+        body.thunderstorm h1, body.thunderstorm p, body.thunderstorm #cityInput, body.thunderstorm .weather-card h2 {
+            color: var(--text-color);
+        }
+        body.thunderstorm .weather-card {
+            background: rgba(255, 255, 255, 0.8);
+        }
+        .thunderstorm .weather-icon {
+            animation: lightning-flash 1.5s step-end infinite alternate;
+        }
+        @keyframes lightning-flash {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* Mist/Fog/Haze */
+        body.mist {
+            --bg-start: #CFD8DC; /* Light Blue Grey */
+            --bg-end: #E0E0E0;  /* Light Grey */
+            --text-color: #444;
+            --card-bg: rgba(255, 255, 255, 0.85);
+            --button-bg: #90A4AE;
+            --button-hover-bg: #78909C;
+        }
+
+        /* Fallback for unknown conditions */
+        body.default {
+            background-image: linear-gradient(135deg, #a2d9ff, #e0f7fa);
+            --text-color: #333;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --button-bg: #007BFF;
+            --button-hover-bg: #0056b3;
+        }
+
+
+        /* Responsive Adjustments */
+        @media (max-width: 600px) {
+            body {
+                padding: 20px;
+                align-items: flex-start; /* Align to top on small screens */
+            }
+            .container {
+                padding: 25px;
+                border-radius: 15px;
+            }
+            h1 {
+                font-size: 2em;
+            }
+            p {
+                font-size: 1em;
+            }
+            .input-group {
+                flex-direction: column;
+                gap: 15px;
+            }
+            #cityInput, button {
+                width: 100%;
+                max-width: none;
+            }
+            .weather-card {
+                padding: 20px;
+            }
+            .weather-details {
+                grid-template-columns: 1fr;
+                max-width: 100%;
+            }
+        }
+
+        @media (max-width: 400px) {
+            h1 {
+                font-size: 1.8em;
+            }
+            .weather-icon {
+                font-size: 3em;
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><span role="img" aria-label="Weather">🌦</span> Dynamic Weather</h1>
+        <p>Get instant weather updates for any city!</p>
+
+        <div class="input-group">
+            <input type="text" id="cityInput" placeholder="Enter city name (e.g., London)" list="citySuggestions">
+            <datalist id="citySuggestions">
+                <!-- Popular cities as suggestions --><option value="Delhi"></option>
+                <option value="Mumbai"></option>
+                <option value="Kolkata"></option>
+                <option value="Chennai"></option>
+                <option value="Bangalore"></option>
+                <option value="London"></option>
+                <option value="New York"></option>
+                <option value="Tokyo"></option>
+                <option value="Paris"></option>
+                <option value="Sydney"></option>
+                <option value="Dubai"></option>
+                <option value="Berlin"></option>
+                <option value="Rome"></option>
+                <option value="Cairo"></option>
+                <option value="Rio de Janeiro"></option>
+            </datalist>
+            <button onclick="fetchWeather()">Get Weather</button>
+        </div>
+
+        <div id="weatherResult">
+            <!-- Weather data will be displayed here --><p>Type a city and click "Get Weather" to begin.</p>
+        </div>
+    </div>
+
+    <script>
+        // Map weather descriptions to simplified categories and emojis/icons
+        const weatherConditionsMap = {
+            // Clear/Sunny
+            'sunny': { class: 'sunny', icon: '☀️' },
+            'clear': { class: 'sunny', icon: '☀️' },
+            'partly sunny': { class: 'sunny', icon: '🌤️' }, // Using sunny for partly sunny
+
+            // Cloudy
+            'cloudy': { class: 'cloudy', icon: '☁️' },
+            'overcast': { class: 'cloudy', icon: '☁️' },
+            'partly cloudy': { class: 'cloudy', icon: '⛅' },
+            'mostly cloudy': { class: 'cloudy', icon: '☁️' },
+
+            // Rain
+            'rain': { class: 'rainy', icon: '🌧️' },
+            'light rain': { class: 'rainy', icon: '🌧️' },
+            'moderate rain': { class: 'rainy', icon: '🌧️' },
+            'heavy rain': { class: 'rainy', icon: '⛈️' },
+            'drizzle': { class: 'rainy', icon: ' drizzling ☔' },
+            'patchy light rain': { class: 'rainy', icon: '🌧️' },
+            'showers': { class: 'rainy', icon: '☔' },
+            'torrential rain': { class: 'rainy', icon: '⛈️' },
+
+            // Snow
+            'snow': { class: 'snowy', icon: '❄️' },
+            'light snow': { class: 'snowy', icon: '🌨️' },
+            'heavy snow': { class: 'snowy', icon: ' Blizzard 🌨️' },
+            'patchy light snow': { class: 'snowy', icon: '🌨️' },
+            'sleet': { class: 'snowy', icon: '🌨️' },
+            'ice pellets': { class: 'snowy', icon: '🧊' },
+
+            // Thunderstorm
+            'thunder': { class: 'thunderstorm', icon: '⚡' },
+            'thunderstorm': { class: 'thunderstorm', icon: '⛈️' },
+            'thundery outbreaks possible': { class: 'thunderstorm', icon: '⚡' },
+
+            // Mist/Fog/Haze
+            'mist': { class: 'mist', icon: '🌫️' },
+            'fog': { class: 'mist', icon: '🌫️' },
+            'haze': { class: 'mist', icon: '🌫️' },
+            'freezing fog': { class: 'mist', icon: '🥶🌫️' },
+            
+            // Other extreme/specific conditions
+            'blizzard': { class: 'snowy', icon: '🌨️' },
+            'freezing drizzle': { class: 'rainy', icon: '🧊🌧️' },
+            'light freezing rain': { class: 'rainy', icon: '🧊🌧️' },
+            'moderate or heavy freezing rain': { class: 'rainy', icon: '🧊🌧️' },
+            'ice': { class: 'snowy', icon: '🧊' },
+            'heavy freezing drizzle': { class: 'rainy', icon: '🧊🌧️' },
+            'blowing snow': { class: 'snowy', icon: '🌬️❄️' },
+            'patchy heavy snow': { class: 'snowy', icon: '🌨️' },
+            'patchy snow': { class: 'snowy', icon: '🌨️' },
+            'light showers of ice pellets': { class: 'snowy', icon: '🧊' },
+            'moderate or heavy showers of ice pellets': { class: 'snowy', icon: '🧊' },
+            'light snow showers': { class: 'snowy', icon: '🌨️' },
+            'moderate or heavy snow showers': { class: 'snowy', icon: '🌨️' },
+            'patchy light drizzle': { class: 'rainy', icon: '☔' },
+            'patchy light rain': { class: 'rainy', icon: '☔' },
+            'patchy moderate rain': { class: 'rainy', icon: '☔' },
+            'patchy heavy rain': { class: 'rainy', icon: '⛈️' },
+            'patchy light snow': { class: 'snowy', icon: '🌨️' },
+            'patchy moderate snow': { class: 'snowy', icon: '🌨️' },
+            'patchy heavy snow': { class: 'snowy', icon: '🌨️' },
+            'patchy sleet': { class: 'snowy', icon: '🌨️' },
+            'patchy freezing drizzle': { class: 'rainy', icon: '🧊🌧️' },
+            'patchy freezing rain': { class: 'rainy', icon: '🧊🌧️' },
+            'light rain shower': { class: 'rainy', icon: '☔' },
+            'moderate or heavy rain shower': { class: 'rainy', icon: '⛈️' },
+            'heavy rain shower': { class: 'rainy', icon: '⛈️' },
+            'isolated showers': { class: 'rainy', icon: '☔' },
+            'patchy freezing rain possible': { class: 'rainy', icon: '🧊🌧️' },
+            'patchy light drizzle possible': { class: 'rainy', icon: '☔' },
+            'patchy light rain possible': { class: 'rainy', icon: '☔' },
+            'patchy snow possible': { class: 'snowy', icon: '🌨️' },
+            'patchy sleet possible': { class: 'snowy', icon: '🌨️' },
+        };
+
+
+        async function fetchWeather() {
+            const cityInput = document.getElementById('cityInput');
+            const city = cityInput.value.trim(); // Trim whitespace
+            const weatherResultDiv = document.getElementById('weatherResult');
+
+            if (!city) {
+                weatherResultDiv.innerHTML = '<p style="color:red;">Please enter a city name.</p>';
+                return;
+            }
+
+            weatherResultDiv.innerHTML = '<p>Loading weather data...</p>';
+            document.body.className = 'default'; // Reset background while loading
+
+            try {
+                const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
+                const data = await r.json();
+
+                if (!r.ok || !data.current_condition || data.current_condition.length === 0) {
+                    let errorMessage = 'Error fetching weather data.';
+                    if (data.error && data.error.length > 0) {
+                        errorMessage = `Error: ${data.error[0].msg}`;
+                    }
+                    weatherResultDiv.innerHTML = `<p style="color:red;">${errorMessage} for "${city}". Please try again.</p>`;
+                    document.body.className = 'default'; // Keep default on error
+                    return;
+                }
+
+                const current = data.current_condition[0];
+                const weatherDescText = current.weatherDesc[0].value.toLowerCase();
+                
+                // Determine weather class and icon
+                let weatherClass = 'default';
+                let weatherIcon = '❓'; // Default icon for unknown conditions
+
+                for (const key in weatherConditionsMap) {
+                    if (weatherDescText.includes(key)) {
+                        weatherClass = weatherConditionsMap[key].class;
+                        weatherIcon = weatherConditionsMap[key].icon;
+                        break;
+                    }
+                }
+
+                document.body.className = weatherClass; // Apply dynamic background class
+
+                const weatherHtml = `
+                    <div class="weather-card">
+                        <div class="weather-icon">${weatherIcon}</div>
+                        <h2>${city}</h2>
+                        <div class="weather-details">
+                            <p><strong>Temperature:</strong> ${current.temp_C} °C</p>
+                            <p><strong>Feels Like:</strong> ${current.FeelsLikeC} °C</p>
+                            <p><strong>Humidity:</strong> ${current.humidity}%</p>
+                            <p><strong>Wind Speed:</strong> ${current.windspeedKmph} km/h</p>
+                            <p class="full-width"><strong>Condition:</strong> ${current.weatherDesc[0].value}</p>
+                        </div>
+                    </div>
+                `;
+                weatherResultDiv.innerHTML = weatherHtml;
+            } catch (e) {
+                weatherResultDiv.innerHTML = `<p style="color:red;">Network Error: ${e.message}. Please check your connection.</p>`;
+                document.body.className = 'default'; // Keep default on network error
+            }
+        }
+
+        // Optional: Trigger search on Enter key press
+        document.getElementById('cityInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                fetchWeather();
+            }
+        });
+
+        // Optional: Pre-fetch weather for a default city on load
+        document.addEventListener('DOMContentLoaded', () => {
+             document.getElementById('cityInput').value = 'London'; // Default city
+             fetchWeather();
+        });
+    </script>
 </body>
 </html>
