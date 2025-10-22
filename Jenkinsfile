@@ -192,18 +192,25 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
+                // Ensure keyFileVariable name is correct based on your Jenkinsfile,
+                // using 'SSH_KEY_PATH' as in the corrected previous step.
+                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) { 
                     bat """
                         @echo off
                         
                         REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
                         
-                        REM Remove inherited permissions and grant Full Control only to the current user (Jenkins service account)
-                        echo Securing private key file: %SSH_KEY_PATH%
-                        icacls "%SSH_KEY_PATH%" /inheritance:r /grant:r "%%USERNAME%%":F
+                        echo Securing private key file: %%SSH_KEY_PATH%%
+                        
+                        REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
+                        REM **This is the most reliable way to secure the key on a Windows Jenkins agent**
+                        icacls "%%SSH_KEY_PATH%%" /inheritance:r
+                        icacls "%%SSH_KEY_PATH%%" /grant:r "NT AUTHORITY\\SYSTEM":F
+                        icacls "%%SSH_KEY_PATH%%" /grant:r "Administrators":F
                         
                         IF ERRORLEVEL 1 (
                             echo ERROR: Failed to set secure permissions on the SSH key.
+                            REM The failure code here is crucial, since icacls runs multiple times, we need to check the last one.
                             exit /b 1
                         )
                         
@@ -213,32 +220,32 @@ pipeline {
                         set /p ECR_URI_RAW=<ecr_info.txt
                         set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
 
-                        IF "%EC2_HOST%"=="" (
+                        IF "%%EC2_HOST%%"=="" (
                             echo ERROR: EC2_HOST is not set. Deployment aborted.
                             exit /b 1
                         )
 
-                        echo Copying deploy.sh to ubuntu@%EC2_HOST%
+                        echo Copying deploy.sh to ubuntu@%%EC2_HOST%%
                         
-                        REM scp command - use the now-secured SSH_KEY_PATH variable
-                        scp -o StrictHostKeyChecking=no -i "%SSH_KEY_PATH%" .\\deploy.sh ubuntu@%EC2_HOST%:/home/ubuntu/deploy.sh
+                        REM scp command
+                        scp -o StrictHostKeyChecking=no -i "%%SSH_KEY_PATH%%" .\\deploy.sh ubuntu@%%EC2_HOST%%:/home/ubuntu/deploy.sh
                         
                         IF NOT ERRORLEVEL 0 (
                             echo SCP failed!
                             exit /b 1
                         )
 
-                        echo Running deploy on %EC2_HOST% with image %ECR_URI_CLEAN%
+                        echo Running deploy on %%EC2_HOST%% with image %%ECR_URI_CLEAN%%
                         
                         REM ssh command
-                        ssh -o StrictHostKeyChecking=no -i "%SSH_KEY_PATH%" ubuntu@%EC2_HOST% "bash /home/ubuntu/deploy.sh %ECR_URI_CLEAN% %AWS_REGION%"
+                        ssh -o StrictHostKeyChecking=no -i "%%SSH_KEY_PATH%%" ubuntu@%%EC2_HOST%% "bash /home/ubuntu/deploy.sh %%ECR_URI_CLEAN%% %%AWS_REGION%%"
                         
                         IF NOT ERRORLEVEL 0 (
                             echo SSH deployment failed!
                             exit /b 1
                         )
                         
-                        echo Deployment successful to %EC2_HOST%.
+                        echo Deployment successful to %%EC2_HOST%%.
                     """
                 }
             }
