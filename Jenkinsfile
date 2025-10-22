@@ -16,7 +16,7 @@ pipeline {
         stage('Get AWS Account') {
             steps {
                 script {
-                    // REVERTED: Using usernamePassword to match the new Standard Username/Password credential type
+                    // Current binding matches your 'Username with password' credential type
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
@@ -38,7 +38,6 @@ pipeline {
 
         stage('Login to ECR (diagnose)') {
             steps {
-                // REVERTED: Using usernamePassword
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
@@ -57,7 +56,7 @@ pipeline {
 
                         Write-Output "Attempting docker login..."
 
-                        # RETAINED FIX: Removed --profile default and added --no-cli-pager for clean token
+                        # ✅ CRITICAL FIX APPLIED: Ensure clean output for Docker
                         \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
@@ -85,7 +84,6 @@ pipeline {
 
         stage('Tag & Push to ECR') {
             steps {
-                // REVERTED: Using usernamePassword
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
@@ -95,6 +93,13 @@ pipeline {
                         \$env:AWS_REGION = "${AWS_REGION}"
                         \$env:AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
 
+                        # Run ECR login again to refresh token before push
+                        \$ecrUriAuth = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
+                        \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager
+                        if (-not \$password) { Write-Error "Failed to get ECR password for push"; exit 3 }
+                        \$password | docker login --username AWS --password-stdin \$ecrUriAuth
+                        if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed before push"; exit 5 }
+                        
                         \$ecrUri = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com/\$env:ECR_REPO"
                         \$localTag = "\$env:ECR_REPO:\$env:BUILD_NUMBER"
                         \$remoteTag = "\$ecrUri:\$env:BUILD_NUMBER"
@@ -117,7 +122,6 @@ pipeline {
         stage('Resolve EC2 IP (by tag)') {
             steps {
                 script {
-                    // REVERTED: Using usernamePassword
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
