@@ -190,26 +190,32 @@ pipeline {
             }
         }
 
-        stage('Deploy to EC2') {
+        // ... previous stages ...
+
+stage('Deploy to EC2') {
     steps {
         script {
-            // Pre-resolve Groovy environment variables for use in the bat command
             def ec2Host = env.EC2_HOST 
             def awsRegion = env.AWS_REGION
+            
+            // --- NEW: Read file and clean string using Groovy ---
+            def ecrInfo = readFile(file: 'ecr_info.txt').trim()
+            // Clean the string: "ECR_URI=..." -> "..."
+            def ecrUriClean = ecrInfo.substring(ecrInfo.indexOf('=') + 1)
+            echo "Clean ECR URI: ${ecrUriClean}"
+            // ----------------------------------------------------
 
-            // 1. Resolve SSH_KEY_PATH within the withCredentials block
             withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
                 def keyPath = env.SSH_KEY_PATH
-                
-                // Add this step to ensure line endings are correct before SCP
-                // NOTE: The 'dos2unix' tool must be installed and in the PATH on the Windows Jenkins agent
+
+                // Line ending conversion (already working)
                 bat 'dos2unix deploy.sh'
 
-                // 2. Execute the deployment script
+                // The main deployment script
                 bat """
                     @echo off
 
-                    REM --- 1. Fix Key Permissions (KeyPath is Groovy-interpolated) ---
+                    REM --- 1. Fix Key Permissions ---
                     echo Securing private key file: ${keyPath}
                     icacls "${keyPath}" /inheritance:r
                     icacls "${keyPath}" /grant:r "NT AUTHORITY\\SYSTEM":F
@@ -222,12 +228,8 @@ pipeline {
                     
                     REM --- 2. Deployment Logic ---
                     
-                    REM Retrieve ECR URI from the artifact file
-                    set /p ECR_URI_RAW=<ecr_info.txt
-                    REM Set the temporary Batch variable ECR_URI_CLEAN
-                    set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
-
-                    REM Check EC2_HOST (Groovy-interpolated)
+                    REM ECR_URI_CLEAN is now handled by Groovy interpolation (\${ecrUriClean})
+                    
                     IF "${ec2Host}"=="" (
                         echo ERROR: EC2_HOST is not set. Deployment aborted.
                         exit /b 1
@@ -235,7 +237,7 @@ pipeline {
 
                     echo Copying deploy.sh to ubuntu@${ec2Host}
                     
-                    REM SCP command (Groovy-interpolated variables: keyPath, ec2Host)
+                    REM SCP command
                     scp -o StrictHostKeyChecking=no -i "${keyPath}" .\\deploy.sh ubuntu@${ec2Host}:/home/ubuntu/deploy.sh
                     
                     IF NOT ERRORLEVEL 0 (
@@ -243,13 +245,11 @@ pipeline {
                         exit /b 1
                     )
 
-                    REM Use immediate Batch expansion for ECR_URI_CLEAN for the echo line
-                    echo Running deploy on ${ec2Host} with image %ECR_URI_CLEAN%
+                    REM Use Groovy variable directly in the echo/ssh command
+                    echo Running deploy on ${ec2Host} with image ${ecrUriClean}
                     
-                    REM SSH command
-                    REM keyPath, ec2Host, awsRegion are Groovy-interpolated.
-                    REM ECR_URI_CLEAN uses **single percent signs** for immediate Batch expansion on the command line.
-                    ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@${ec2Host} "bash /home/ubuntu/deploy.sh %ECR_URI_CLEAN% ${awsRegion}"
+                    REM SSH command: Pass the clean ECR URI directly
+                    ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@${ec2Host} "bash /home/ubuntu/deploy.sh ${ecrUriClean} ${awsRegion}"
                     
                     IF NOT ERRORLEVEL 0 (
                         echo SSH deployment failed!
