@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 ECR_URI="$1"
-AWS_REGION="${2:-us-east-1}"
+AWS_REGION="${2:-eu-north-1}"
 
 # login to ECR (EC2 must have IAM role or AWS creds/config)
 aws ecr get-login-password --region $AWS_REGION \

@@ -1,5 +1,5 @@
 # Use your prebuilt base image from ECR (replace ACCOUNT_ID with yours)
-FROM 491519648367.dkr.ecr.us-east-1.amazonaws.com/weather-base:latest
+FROM 491519648367.dkr.ecr.eu-north-1.amazonaws.com/weather-base:latest
 
 # Set working directory
 WORKDIR /app
