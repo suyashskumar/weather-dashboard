@@ -201,15 +201,16 @@ pipeline {
             withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
                 def keyPath = env.SSH_KEY_PATH
                 
+                // Add this step to ensure line endings are correct before SCP
+                // NOTE: The 'dos2unix' tool must be installed and in the PATH on the Windows Jenkins agent
+                bat 'dos2unix deploy.sh'
+
                 // 2. Execute the deployment script
                 bat """
                     @echo off
 
-                    REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
-                    REM Use Groovy interpolation for the key path
+                    REM --- 1. Fix Key Permissions (KeyPath is Groovy-interpolated) ---
                     echo Securing private key file: ${keyPath}
-                    
-                    REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
                     icacls "${keyPath}" /inheritance:r
                     icacls "${keyPath}" /grant:r "NT AUTHORITY\\SYSTEM":F
                     icacls "${keyPath}" /grant:r "Administrators":F
@@ -223,10 +224,10 @@ pipeline {
                     
                     REM Retrieve ECR URI from the artifact file
                     set /p ECR_URI_RAW=<ecr_info.txt
-                    REM Use Batch variable expansion (double percents) for internal SET commands
+                    REM Set the temporary Batch variable ECR_URI_CLEAN
                     set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
 
-                    REM Use Groovy interpolation for EC2_HOST 
+                    REM Check EC2_HOST (Groovy-interpolated)
                     IF "${ec2Host}"=="" (
                         echo ERROR: EC2_HOST is not set. Deployment aborted.
                         exit /b 1
@@ -234,7 +235,7 @@ pipeline {
 
                     echo Copying deploy.sh to ubuntu@${ec2Host}
                     
-                    REM Use Groovy interpolation for keyPath and ec2Host
+                    REM SCP command (Groovy-interpolated variables: keyPath, ec2Host)
                     scp -o StrictHostKeyChecking=no -i "${keyPath}" .\\deploy.sh ubuntu@${ec2Host}:/home/ubuntu/deploy.sh
                     
                     IF NOT ERRORLEVEL 0 (
@@ -242,12 +243,13 @@ pipeline {
                         exit /b 1
                     )
 
-                    REM Use Batch expansion (%%) for internal variable ECR_URI_CLEAN
-                    echo Running deploy on ${ec2Host} with image %%ECR_URI_CLEAN%%
+                    REM Use immediate Batch expansion for ECR_URI_CLEAN for the echo line
+                    echo Running deploy on ${ec2Host} with image %ECR_URI_CLEAN%
                     
-                    REM Use Groovy interpolation for keyPath, ec2Host, and awsRegion
-                    REM Use Batch expansion (%%) for internal variable ECR_URI_CLEAN
-                    ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@${ec2Host} "bash /home/ubuntu/deploy.sh %%ECR_URI_CLEAN%% ${awsRegion}"
+                    REM SSH command
+                    REM keyPath, ec2Host, awsRegion are Groovy-interpolated.
+                    REM ECR_URI_CLEAN uses **single percent signs** for immediate Batch expansion on the command line.
+                    ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@${ec2Host} "bash /home/ubuntu/deploy.sh %ECR_URI_CLEAN% ${awsRegion}"
                     
                     IF NOT ERRORLEVEL 0 (
                         echo SSH deployment failed!
