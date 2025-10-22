@@ -192,9 +192,8 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                // Ensure keyFileVariable name is correct based on your Jenkinsfile,
-                // using 'SSH_KEY_PATH' as in the corrected previous step.
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) { 
+                // Key path is mapped to SSH_KEY_PATH
+                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
                     bat """
                         @echo off
                         
@@ -203,14 +202,13 @@ pipeline {
                         echo Securing private key file: %%SSH_KEY_PATH%%
                         
                         REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
-                        REM **This is the most reliable way to secure the key on a Windows Jenkins agent**
+                        REM This should resolve both the file-not-found and permissions-too-open issues.
                         icacls "%%SSH_KEY_PATH%%" /inheritance:r
                         icacls "%%SSH_KEY_PATH%%" /grant:r "NT AUTHORITY\\SYSTEM":F
                         icacls "%%SSH_KEY_PATH%%" /grant:r "Administrators":F
                         
                         IF ERRORLEVEL 1 (
                             echo ERROR: Failed to set secure permissions on the SSH key.
-                            REM The failure code here is crucial, since icacls runs multiple times, we need to check the last one.
                             exit /b 1
                         )
                         
@@ -227,7 +225,7 @@ pipeline {
 
                         echo Copying deploy.sh to ubuntu@%%EC2_HOST%%
                         
-                        REM scp command
+                        REM scp command - NOTE: The key file variable must be double-escaped.
                         scp -o StrictHostKeyChecking=no -i "%%SSH_KEY_PATH%%" .\\deploy.sh ubuntu@%%EC2_HOST%%:/home/ubuntu/deploy.sh
                         
                         IF NOT ERRORLEVEL 0 (
