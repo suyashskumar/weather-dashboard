@@ -80,8 +80,13 @@ pipeline {
             steps {
                 powershell """
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
-                    \$tag = "\$env:ECR_REPO:\$env:BUILD_NUMBER" 
+                    
+                    # ✅ FIX 1: Use the full ECR_REPO name for the local image to avoid ambiguity
+                    \$local_tag_name = "\$env:ECR_REPO"
+                    \$tag = "\$local_tag_name:\$env:BUILD_NUMBER" 
+
                     Write-Output "Building Docker image \$tag"
+                    # Tag the image with the repository name, not just the build number
                     docker build -t \$tag -f Dockerfile .
                     if (\$LASTEXITCODE -ne 0) { Write-Error "Docker build failed"; exit 1 }
                 """
@@ -90,7 +95,7 @@ pipeline {
 
         stage('Tag & Push to ECR') {
             steps {
-                script { // Must use 'script' to contain the 'bat' step inside stages
+                script {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
@@ -100,11 +105,11 @@ pipeline {
                             set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             set AWS_REGION=${AWS_REGION}
                             set AWS_ACCOUNT_ID=${env.AWS_ACCOUNT_ID}
-
+                            
                             REM Re-run ECR login for push
                             set ECR_URI_AUTH=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com
                             
-                            REM ✅ WORKAROUND: Use FOR /F to capture the clean token
+                            REM Use FOR /F to capture the clean token
                             FOR /F "tokens=*" %%i IN ('aws ecr get-login-password --region %AWS_REGION% --output text --no-cli-pager') DO (
                                 SET AWS_TOKEN=%%i
                             )
@@ -116,19 +121,24 @@ pipeline {
                                 exit /b 5
                             )
                             
-                            set ECR_URI=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com/%ECR_REPO%
-                            set LOCAL_TAG=%ECR_REPO%:%BUILD_NUMBER%
-                            set REMOTE_TAG=%ECR_URI%:%BUILD_NUMBER%
+                            REM Define tags based on the full repo name used in 'Build image'
+                            set LOCAL_REPO_NAME=%ECR_REPO%
+                            set ECR_URI_FULL=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com/%LOCAL_REPO_NAME%
+                            set LOCAL_TAG=%LOCAL_REPO_NAME%:%BUILD_NUMBER%
+                            set REMOTE_TAG=%ECR_URI_FULL%:%BUILD_NUMBER%
 
-                            echo Tagging %LOCAL_TAG% -> %REMOTE_TAG%
+                            REM ✅ FIX 2: Use a safe echo without the '->' symbol to avoid redirection error
+                            echo Tagging image...
                             docker tag %LOCAL_TAG% %REMOTE_TAG%
                             IF NOT ERRORLEVEL 0 (
+                                echo Docker tag failed! Ensure local image %LOCAL_TAG% exists.
                                 exit /b 1
                             )
 
                             echo Pushing %REMOTE_TAG%
                             docker push %REMOTE_TAG%
                             IF NOT ERRORLEVEL 0 (
+                                echo Docker push failed.
                                 exit /b 1
                             )
 
