@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Weather Dashboard</title>
+    <title>Weather Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -183,7 +183,7 @@
         body.sunny {
             --bg-start: #FFD700; /* Gold */
             --bg-end: #FFECB3;  /* Light Yellow */
-            --text-color: #333;
+            --text-color: #000000;
             --card-bg: rgba(255, 255, 255, 0.85);
             --button-bg: #FFC107;
             --button-hover-bg: #FFA000;
@@ -200,7 +200,7 @@
         body.cloudy {
             --bg-start: #B0BEC5; /* Blue Grey */
             --bg-end: #ECEFF1;  /* Light Grey */
-            --text-color: #333;
+            --text-color: #000000;
             --card-bg: rgba(255, 255, 255, 0.8);
             --button-bg: #607D8B;
             --button-hover-bg: #455A64;
@@ -210,7 +210,7 @@
         body.rainy {
             --bg-start: #616161; /* Dark Grey */
             --bg-end: #9E9E9E;  /* Medium Grey */
-            --text-color: #EEE;
+            --text-color: #000000;
             --card-bg: rgba(255, 255, 255, 0.7);
             --button-bg: #424242;
             --button-hover-bg: #212121;
@@ -275,7 +275,7 @@
         body.mist {
             --bg-start: #CFD8DC; /* Light Blue Grey */
             --bg-end: #E0E0E0;  /* Light Grey */
-            --text-color: #444;
+            --text-color: #000000;
             --card-bg: rgba(255, 255, 255, 0.85);
             --button-bg: #90A4AE;
             --button-hover-bg: #78909C;
@@ -337,8 +337,8 @@
 </head>
 <body>
     <div class="container">
-        <h1><span role="img" aria-label="Weather">🌦</span> Dynamic Weather</h1>
-        <p>Get instant weather updates for any city!</p>
+        <h1><span role="img" aria-label="Weather">🌦</span> Welcome to the Weather Dashboard!</h1>
+        <p>Get instant weather updates for any city! (By Suyash)</p>
 
         <div class="input-group">
             <input type="text" id="cityInput" placeholder="Enter city name (e.g., London)" list="citySuggestions">
@@ -372,7 +372,7 @@
         const weatherConditionsMap = {
             // Clear/Sunny
             'sunny': { class: 'sunny', icon: '☀️' },
-            'clear': { class: 'sunny', icon: '☀️' },
+            'clear': { class: 'sunny', icon: '✨' },
             'partly sunny': { class: 'sunny', icon: '🌤️' }, // Using sunny for partly sunny
 
             // Cloudy
