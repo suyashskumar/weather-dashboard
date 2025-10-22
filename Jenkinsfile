@@ -156,25 +156,20 @@ pipeline {
                             set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             set AWS_REGION=${AWS_REGION}
                             
-                            REM Initialize EC2_IP
-                            set EC2_IP=
-                            set EC2_IP_FOUND=false
-
-                            REM Capture AWS CLI output
+                            REM Capture AWS CLI output to EC2_IP variable
+                            SET EC2_IP_FOUND=
                             FOR /F "tokens=*" %%a IN ('aws ec2 describe-instances --region %AWS_REGION% --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text') DO (
                                 SET EC2_IP=%%a
                                 SET EC2_IP_FOUND=true
                             )
                             
                             REM Check the result
-                            IF "%EC2_IP_FOUND%"=="false" (
-                                echo ERROR: AWS CLI command failed to find instance or FOR /F failed to run.
+                            IF NOT "%EC2_IP_FOUND%"=="true" (
+                                echo ERROR: AWS CLI command failed to find instance.
                                 exit /b 1
                             )
                             
-                            REM Remove any potential spaces from the captured IP
-                            SET EC2_IP=%EC2_IP: =%
-                            
+                            REM The IP is captured, check if it's 'None' or empty (may have leading/trailing spaces)
                             IF "%EC2_IP%"=="" (
                                 echo ERROR: Could not find running EC2 (tag Name=weather-new). Check instance status.
                                 exit /b 1
@@ -184,13 +179,13 @@ pipeline {
                                 exit /b 1
                             )
 
-                            REM Set the environment variable for Jenkins
+                            REM Write the resolved IP to a temporary file
+                            echo EC2_HOST=%EC2_IP%> ec2_host_temp.txt
                             echo Resolved EC2 host: %EC2_IP%
-                            echo EC2_HOST=%EC2_IP% > ec2_host_temp.txt
                         """
-                        // Read the output back into the Jenkins environment
+                        // Read the output back into the Jenkins environment (trimming handles spaces)
                         def ip = readFile('ec2_host_temp.txt').trim().replace('EC2_HOST=','')
-                        env.EC2_HOST = ip
+                        env.EC2_HOST = ip.trim() // Use trim() again to be safe
                         // clean up temp file
                         bat 'del ec2_host_temp.txt'
                     }
