@@ -192,59 +192,68 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                // Key path is mapped to SSH_KEY_PATH
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
-                    bat """
-                        @echo off
-                        
-                        REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
-                        
-                        echo Securing private key file: %%SSH_KEY_PATH%%
-                        
-                        REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
-                        REM This should resolve both the file-not-found and permissions-too-open issues.
-                        icacls "%%SSH_KEY_PATH%%" /inheritance:r
-                        icacls "%%SSH_KEY_PATH%%" /grant:r "NT AUTHORITY\\SYSTEM":F
-                        icacls "%%SSH_KEY_PATH%%" /grant:r "Administrators":F
-                        
-                        IF ERRORLEVEL 1 (
-                            echo ERROR: Failed to set secure permissions on the SSH key.
-                            exit /b 1
-                        )
-                        
-                        REM --- 2. Deployment Logic ---
-                        
-                        REM Retrieve ECR URI from the artifact file
-                        set /p ECR_URI_RAW=<ecr_info.txt
-                        set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
+                script {
+                    def keyPath = "" // Initialize a Groovy variable
 
-                        IF "%%EC2_HOST%%"=="" (
-                            echo ERROR: EC2_HOST is not set. Deployment aborted.
-                            exit /b 1
-                        )
+                    // Use withCredentials to populate the Groovy variable
+                    withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY_PATH')]) {
+                        // The value of SSH_KEY_PATH is available here in the environment
+                        keyPath = env.SSH_KEY_PATH
+                        
+                        // Now, execute the bat command using Groovy interpolation for the path
+                        bat """
+                            @echo off
+                            
+                            REM --- 1. Fix Key Permissions (Mandatory for Windows OpenSSH) ---
+                            
+                            // Groovy resolves '${keyPath}' to the actual file path before Batch starts
+                            echo Securing private key file: ${keyPath}
+                            
+                            REM Remove inherited permissions, then grant access only to the SYSTEM and Administrators group
+                            icacls "${keyPath}" /inheritance:r
+                            icacls "${keyPath}" /grant:r "NT AUTHORITY\\SYSTEM":F
+                            icacls "${keyPath}" /grant:r "Administrators":F
+                            
+                            IF ERRORLEVEL 1 (
+                                echo ERROR: Failed to set secure permissions on the SSH key.
+                                exit /b 1
+                            )
+                            
+                            REM --- 2. Deployment Logic ---
+                            
+                            REM Retrieve ECR URI from the artifact file
+                            set /p ECR_URI_RAW=<ecr_info.txt
+                            set ECR_URI_CLEAN=%%ECR_URI_RAW:ECR_URI=%%
 
-                        echo Copying deploy.sh to ubuntu@%%EC2_HOST%%
-                        
-                        REM scp command - NOTE: The key file variable must be double-escaped.
-                        scp -o StrictHostKeyChecking=no -i "%%SSH_KEY_PATH%%" .\\deploy.sh ubuntu@%%EC2_HOST%%:/home/ubuntu/deploy.sh
-                        
-                        IF NOT ERRORLEVEL 0 (
-                            echo SCP failed!
-                            exit /b 1
-                        )
+                            // All other variables still need double escaping
+                            IF "%%EC2_HOST%%"=="" (
+                                echo ERROR: EC2_HOST is not set. Deployment aborted.
+                                exit /b 1
+                            )
 
-                        echo Running deploy on %%EC2_HOST%% with image %%ECR_URI_CLEAN%%
-                        
-                        REM ssh command
-                        ssh -o StrictHostKeyChecking=no -i "%%SSH_KEY_PATH%%" ubuntu@%%EC2_HOST%% "bash /home/ubuntu/deploy.sh %%ECR_URI_CLEAN%% %%AWS_REGION%%"
-                        
-                        IF NOT ERRORLEVEL 0 (
-                            echo SSH deployment failed!
-                            exit /b 1
-                        )
-                        
-                        echo Deployment successful to %%EC2_HOST%%.
-                    """
+                            echo Copying deploy.sh to ubuntu@%%EC2_HOST%%
+                            
+                            // Use Groovy interpolation for the key path
+                            scp -o StrictHostKeyChecking=no -i "${keyPath}" .\\deploy.sh ubuntu@%%EC2_HOST%%:/home/ubuntu/deploy.sh
+                            
+                            IF NOT ERRORLEVEL 0 (
+                                echo SCP failed!
+                                exit /b 1
+                            )
+
+                            echo Running deploy on %%EC2_HOST%% with image %%ECR_URI_CLEAN%%
+                            
+                            // Use Groovy interpolation for the key path
+                            ssh -o StrictHostKeyChecking=no -i "${keyPath}" ubuntu@%%EC2_HOST%% "bash /home/ubuntu/deploy.sh %%ECR_URI_CLEAN%% %%AWS_REGION%%"
+                            
+                            IF NOT ERRORLEVEL 0 (
+                                echo SSH deployment failed!
+                                exit /b 1
+                            )
+                            
+                            echo Deployment successful to %%EC2_HOST%%.
+                        """
+                    }
                 }
             }
         }
