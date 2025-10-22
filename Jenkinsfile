@@ -56,8 +56,8 @@ pipeline {
 
                         Write-Output "Attempting docker login..."
 
-                        # ✅ ULTIMATE FIX APPLIED: Use Out-String -NoNewLine to strip invisible characters
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager | Out-String -NoNewLine
+                        # ✅ NEW ULTIMATE FIX: Capture output, then use the String .Trim() method to remove newlines
+                        \$password = (aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager).Trim()
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
                         \$password | docker login --username AWS --password-stdin \$ecrUri
@@ -95,8 +95,8 @@ pipeline {
 
                         # Run ECR login again to refresh token before push
                         \$ecrUriAuth = "\$env:AWS_ACCOUNT_ID.dkr.ecr.\$env:AWS_REGION.amazonaws.com"
-                        # ✅ ULTIMATE FIX APPLIED
-                        \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager | Out-String -NoNewLine
+                        # ✅ NEW ULTIMATE FIX: Use .Trim()
+                        \$password = (aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager).Trim()
                         if (-not \$password) { Write-Error "Failed to get ECR password for push"; exit 3 }
                         \$password | docker login --username AWS --password-stdin \$ecrUriAuth
                         if (\$LASTEXITCODE -ne 0) { Write-Error "Docker login failed before push"; exit 5 }
