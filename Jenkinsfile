@@ -41,7 +41,6 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // FIX: Using 'bat' command prompt syntax to reliably capture the ECR token without newlines.
                         bat """
                             REM Set environment variables for AWS CLI
                             set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -78,8 +77,8 @@ pipeline {
                 powershell """
                     if (-not \$env:ECR_REPO) { Write-Error "ECR_REPO not set"; exit 1 }
                     
-                    # FIX: Use \$env:ECR_REPO directly to form the tag 'repo-name:build-number'
-                    \$tag = "\$env:ECR_REPO:\$env:BUILD_NUMBER" 
+                    # FIX: Use only the BUILD_NUMBER as the local tag to match Docker's behavior
+                    \$tag = "\$env:BUILD_NUMBER" 
 
                     Write-Output "Building Docker image \$tag"
                     docker build -t \$tag -f Dockerfile .
@@ -119,7 +118,9 @@ pipeline {
                             REM Define tags based on the full repo name
                             set LOCAL_REPO_NAME=%ECR_REPO%
                             set ECR_URI_FULL=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com/%LOCAL_REPO_NAME%
-                            set LOCAL_TAG=%LOCAL_REPO_NAME%:%BUILD_NUMBER%
+                            
+                            REM FIX: LOCAL_TAG must be only the build number (e.g., '32') to match the built image
+                            set LOCAL_TAG=%BUILD_NUMBER% 
                             set REMOTE_TAG=%ECR_URI_FULL%:%BUILD_NUMBER%
 
                             echo Tagging image...
@@ -164,7 +165,6 @@ pipeline {
                             '''
                         ).trim()
                         
-                        // ✅ FINAL FIX: Use Groovy syntax (==) for string comparison
                         if (!ip || ip == 'None') { error "Could not find running EC2 (tag Name=weather-new)" }
                         
                         env.EC2_HOST = ip
