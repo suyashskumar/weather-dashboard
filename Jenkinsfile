@@ -2,7 +2,8 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = 'us-east-1'
+        // 🚨 FIX: Updated region to match the active EC2 instance
+        AWS_REGION = 'eu-north-1'
         ECR_REPO   = 'weather-dashboard'
     }
 
@@ -19,7 +20,6 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'aws-creds',
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        // NOTE: Keeping this as powershell since it worked and is cleaner for setting env vars
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -157,20 +157,30 @@ pipeline {
                             set AWS_REGION=${AWS_REGION}
                             
                             REM Initialize EC2_IP
-                            set EC2_IP=None
+                            set EC2_IP=
+                            set EC2_IP_FOUND=false
 
-                            REM 🚀 FIX: Use BAT 'FOR /F' to reliably capture AWS CLI output (EC2 IP)
+                            REM Capture AWS CLI output
                             FOR /F "tokens=*" %%a IN ('aws ec2 describe-instances --region %AWS_REGION% --filters "Name=tag:Name,Values=weather-new" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PublicIpAddress" --output text') DO (
                                 SET EC2_IP=%%a
+                                SET EC2_IP_FOUND=true
                             )
                             
                             REM Check the result
+                            IF "%EC2_IP_FOUND%"=="false" (
+                                echo ERROR: AWS CLI command failed to find instance or FOR /F failed to run.
+                                exit /b 1
+                            )
+                            
+                            REM Remove any potential spaces from the captured IP
+                            SET EC2_IP=%EC2_IP: =%
+                            
                             IF "%EC2_IP%"=="" (
-                                echo Could not find running EC2 (tag Name=weather-new)
+                                echo ERROR: Could not find running EC2 (tag Name=weather-new). Check instance status.
                                 exit /b 1
                             )
                             IF "%EC2_IP%"=="None" (
-                                echo Could not find running EC2 (tag Name=weather-new)
+                                echo ERROR: Could not find running EC2 (tag Name=weather-new). Check instance status.
                                 exit /b 1
                             )
 
@@ -181,8 +191,8 @@ pipeline {
                         // Read the output back into the Jenkins environment
                         def ip = readFile('ec2_host_temp.txt').trim().replace('EC2_HOST=','')
                         env.EC2_HOST = ip
-                        // Clean up temp file
-                        // bat 'del ec2_host_temp.txt' // Optional: if you prefer to clean up
+                        // clean up temp file
+                        bat 'del ec2_host_temp.txt'
                     }
                 }
             }
