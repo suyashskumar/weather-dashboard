@@ -16,10 +16,10 @@ pipeline {
         stage('Get AWS Account') {
             steps {
                 script {
-                    // FIX: Changed binding from usernamePassword to awsCredentials
-                    withCredentials([awsCredentials(credentialsId: 'aws-creds',
-                                                   accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                                                   secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    // REVERTED: Using usernamePassword to match the new Standard Username/Password credential type
+                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                         def acct = powershell(
                             returnStdout: true,
                             script: '''
@@ -38,10 +38,10 @@ pipeline {
 
         stage('Login to ECR (diagnose)') {
             steps {
-                // FIX: Changed binding from usernamePassword to awsCredentials
-                withCredentials([awsCredentials(credentialsId: 'aws-creds',
-                                               accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                                               secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                // REVERTED: Using usernamePassword
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
                         # Pass Jenkins secrets to the PowerShell environment
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
@@ -57,7 +57,7 @@ pipeline {
 
                         Write-Output "Attempting docker login..."
 
-                        # FINAL FIX: Removed --profile default and ensured clean output with --no-cli-pager
+                        # RETAINED FIX: Removed --profile default and added --no-cli-pager for clean token
                         \$password = aws ecr get-login-password --region \$env:AWS_REGION --output text --no-cli-pager
                         if (-not \$password) { Write-Error "Failed to get ECR password"; exit 3 }
 
@@ -85,10 +85,10 @@ pipeline {
 
         stage('Tag & Push to ECR') {
             steps {
-                // FIX: Changed binding from usernamePassword to awsCredentials
-                withCredentials([awsCredentials(credentialsId: 'aws-creds',
-                                               accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                                               secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                // REVERTED: Using usernamePassword
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     powershell """
                         \$env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
                         \$env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
@@ -117,10 +117,10 @@ pipeline {
         stage('Resolve EC2 IP (by tag)') {
             steps {
                 script {
-                    // FIX: Changed binding from usernamePassword to awsCredentials
-                    withCredentials([awsCredentials(credentialsId: 'aws-creds',
-                                                   accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                                                   secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    // REVERTED: Using usernamePassword
+                    withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                     usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                         def ip = powershell(
                             returnStdout: true,
                             script: '''
