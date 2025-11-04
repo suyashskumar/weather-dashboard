@@ -110,35 +110,10 @@ docker run -d -p 5000:5000 weather-dashboard
 
 ## Visualization
 
-+------------------+
-|  Developer Push  |
-+--------+---------+
-         |
-         v
-+------------------+
-|    GitHub Repo   |
-+--------+---------+
-         |
-         v
-+------------------+
-| Jenkins Pipeline |
-+--------+---------+
-         |
-         v
-+--------------------------+
-|  AWS ECR (Image Store)   |
-+--------+-----------------+
-         |
-         v
-+--------------------------+
-| AWS EC2 (Deployed App)   |
-+--------------------------+
+Developer Push → GitHub Repo → Jenkins Pipeline → AWS ECR (Image Store) → AWS EC2 (Deployed App)
 
 ---
 
 ## Accessing the App
 
-http://<EC2-Public-IP>
-
-# Access locally
-http://localhost:5000
+http://EC2-Public-IP
